@@ -10,8 +10,8 @@ This file contains the implementation of the DLL kernel module.
 *******************************************************************************/
 
 /*------------------------------------------------------------------------------
-Copyright (c) 2013, SYSTEC electronic GmbH
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, SYSTEC electronic GmbH
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -54,12 +54,12 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <kernel/eventk.h>
 #include <oplk/benchmark.h>
 
-#if CONFIG_TIMER_USE_HIGHRES != FALSE
-#include <kernel/hrestimer.h>
-#endif
-
 #if (CONFIG_DLL_PROCESS_SYNC == DLL_PROCESS_SYNC_ON_TIMER)
 #include <kernel/synctimer.h>
+#endif
+
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+#include <kernel/hrestimer.h>
 #endif
 
 //============================================================================//
@@ -115,16 +115,16 @@ static tOplkError cbCnPresFallbackTimeout(void);
 
 //------------------------------------------------------------------------------
 /**
-\brief  Add DLL kernel module instance
+\brief  Initialize DLL kernel module
 
-The function adds a DLL kernel module instance.
+The function initializes the DLL kernel module.
 
 \return The function returns a tOplkError error code.
 
 \ingroup module_dllk
 */
 //------------------------------------------------------------------------------
-tOplkError dllk_addInstance(void)
+tOplkError dllk_init(void)
 {
     tOplkError      ret = kErrorOk;
     UINT            index;
@@ -132,16 +132,7 @@ tOplkError dllk_addInstance(void)
     // reset instance structure
     OPLK_MEMSET(&dllkInstance_g, 0, sizeof(dllkInstance_g));
 
-    //jba able to work without hresk?
-#if CONFIG_TIMER_USE_HIGHRES != FALSE
-    if ((ret = hrestimer_init()) != kErrorOk)
-        return ret;
-#endif
-
 #if (CONFIG_DLL_PROCESS_SYNC == DLL_PROCESS_SYNC_ON_TIMER)
-    if ((ret = synctimer_addInstance()) != kErrorOk)
-        return ret;
-
     if ((ret = synctimer_registerHandler(cbCnTimerSync)) != kErrorOk)
         return ret;
 
@@ -188,29 +179,21 @@ tOplkError dllk_addInstance(void)
 
 //------------------------------------------------------------------------------
 /**
-\brief  Delete DLL kernel module instance
+\brief  Shut down DLL kernel module
 
-The function deletes a DLL kernel module instance.
+The function shuts down the DLL kernel module.
 
 \return The function returns a tOplkError error code.
 
 \ingroup module_dllk
 */
 //------------------------------------------------------------------------------
-tOplkError dllk_delInstance(void)
+tOplkError dllk_exit(void)
 {
     tOplkError      ret = kErrorOk;
 
     // reset state
     dllkInstance_g.dllState = kDllGsInit;
-
-#if (CONFIG_DLL_PROCESS_SYNC == DLL_PROCESS_SYNC_ON_TIMER)
-    ret = synctimer_delInstance();
-#endif
-
-#if CONFIG_TIMER_USE_HIGHRES != FALSE
-    ret = hrestimer_delInstance();
-#endif
 
     return ret;
 }
@@ -257,19 +240,15 @@ tOplkError dllk_config(tDllConfigParam* pDllConfigParam_p)
 #endif
     }
 
-    if (nmtState < kNmtMsNotActive)
-    {   // CN or NMT reset states are active, so we can calculate the frame timeout.
-        // MN calculates its own frame timeout on kEventTypeDllkCreate.
-        if ((dllkInstance_g.dllConfigParam.cycleLen != 0) &&
-            (dllkInstance_g.dllConfigParam.lossOfFrameTolerance != 0))
-        {   // monitor POWERLINK cycle, calculate frame timeout
-            dllkInstance_g.frameTimeout = (1000LL * ((UINT64)dllkInstance_g.dllConfigParam.cycleLen)) +
-                ((UINT64)dllkInstance_g.dllConfigParam.lossOfFrameTolerance);
-        }
-        else
-        {
-            dllkInstance_g.frameTimeout = 0LL;
-        }
+    if ((dllkInstance_g.dllConfigParam.cycleLen != 0) &&
+        (dllkInstance_g.dllConfigParam.lossOfFrameTolerance != 0))
+    {   // monitor POWERLINK cycle, calculate frame timeout
+        dllkInstance_g.frameTimeout = (1000LL * ((UINT64)dllkInstance_g.dllConfigParam.cycleLen)) +
+            ((UINT64)dllkInstance_g.dllConfigParam.lossOfFrameTolerance);
+    }
+    else
+    {
+        dllkInstance_g.frameTimeout = 0LL;
     }
 
     if (dllkInstance_g.dllConfigParam.fAsyncOnly != FALSE)
@@ -583,16 +562,13 @@ tOplkError dllk_addNode(tDllNodeOpParam* pNodeOpParam_p)
     {
 #if defined(CONFIG_INCLUDE_NMT_MN)
         case kDllNodeOpTypeIsochronous:
-            if (nmtState >= kNmtMsNotActive)
-                ret = dllknode_addNodeIsochronous(pIntNodeInfo);
-            else
-                ret = kErrorDllInvalidParam;
+            ret = dllknode_addNodeIsochronous(pIntNodeInfo);
             break;
 #endif
 
         case kDllNodeOpTypeFilterPdo:
         case kDllNodeOpTypeFilterHeartbeat:
-            if ((nmtState >= kNmtCsNotActive) && (nmtState < kNmtMsNotActive))
+            if (NMT_IF_CN_OR_RMN(nmtState))
                 fUpdateEdrv = TRUE;
             ret = dllknode_addNodeFilter(pIntNodeInfo, pNodeOpParam_p->opNodeType, fUpdateEdrv);
             break;
@@ -634,7 +610,7 @@ tOplkError dllk_deleteNode(tDllNodeOpParam* pNodeOpParam_p)
         {
             case kDllNodeOpTypeFilterPdo:
             case kDllNodeOpTypeFilterHeartbeat:
-                if ((nmtState >= kNmtCsNotActive) && (nmtState < kNmtMsNotActive))
+                if (NMT_IF_CN_OR_RMN(nmtState))
                     fUpdateEdrv = TRUE;
 
                 for (index = 0, pIntNodeInfo = &dllkInstance_g.aNodeInfo[0];
@@ -664,10 +640,7 @@ tOplkError dllk_deleteNode(tDllNodeOpParam* pNodeOpParam_p)
     {
 #if defined(CONFIG_INCLUDE_NMT_MN)
         case kDllNodeOpTypeIsochronous:
-            if (nmtState >= kNmtMsNotActive)
-                ret = dllknode_deleteNodeIsochronous(pIntNodeInfo);
-            else
-                ret = kErrorDllInvalidParam;
+            ret = dllknode_deleteNodeIsochronous(pIntNodeInfo);
             break;
 
         case kDllNodeOpTypeSoftDelete:
@@ -677,7 +650,7 @@ tOplkError dllk_deleteNode(tDllNodeOpParam* pNodeOpParam_p)
 
         case kDllNodeOpTypeFilterPdo:
         case kDllNodeOpTypeFilterHeartbeat:
-            if ((nmtState >= kNmtCsNotActive) && (nmtState < kNmtMsNotActive))
+            if (NMT_IF_CN_OR_RMN(nmtState))
                 fUpdateEdrv = TRUE;
             ret = dllknode_deleteNodeFilter(pIntNodeInfo, pNodeOpParam_p->opNodeType, fUpdateEdrv);
             break;
@@ -798,6 +771,68 @@ tOplkError dllk_postEvent(tEventType eventType_p)
     return ret;
 }
 
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+//------------------------------------------------------------------------------
+/**
+\brief  RMN switch-over timer callback function
+
+This function is called by the timer module.
+
+\param  pEventArg_p         Pointer to timer event argument.
+
+\return The function returns a pointer to the node Information of the node.
+*/
+//------------------------------------------------------------------------------
+tOplkError dllk_cbTimerSwitchOver(tTimerEventArg* pEventArg_p)
+{
+    tOplkError      ret = kErrorOk;
+    tNmtState       nmtState;
+    UINT32          arg;
+    tNmtEvent       nmtEvent;
+    tEvent          event;
+
+    TGT_DLLK_DECLARE_FLAGS;
+
+    TGT_DLLK_ENTER_CRITICAL_SECTION();
+
+#if CONFIG_TIMER_USE_HIGHRES != FALSE
+    if (pEventArg_p->timerHdl != dllkInstance_g.timerHdlSwitchOver)
+    {   // zombie callback - just exit
+        goto Exit;
+    }
+#endif
+
+    nmtState = dllkInstance_g.nmtState;
+    if (!NMT_IF_ACTIVE_CN(nmtState))
+        goto Exit;
+
+    ret = edrv_sendTxBuffer(&dllkInstance_g.pTxBuffer[DLLK_TXFRAME_AMNI]);
+    if (ret != kErrorOk)
+        goto Exit;
+
+    // increment relativeTime for missing SoC
+    dllkInstance_g.relativeTime += dllkInstance_g.dllConfigParam.cycleLen;
+
+    nmtEvent = kNmtEventDllReSwitchOverTimeout;
+    event.eventSink = kEventSinkNmtk;
+    event.eventType = kEventTypeNmtEvent;
+    event.eventArgSize = sizeof(nmtEvent);
+    event.pEventArg = &nmtEvent;
+    ret = eventk_postEvent(&event);
+
+Exit:
+    if (ret != kErrorOk)
+    {
+        BENCHMARK_MOD_02_TOGGLE(7);
+        arg = dllkInstance_g.dllState | (kNmtEventDllReSwitchOverTimeout << 8);
+        // Error event for API layer
+        ret = eventk_postError(kEventSourceDllk, ret, sizeof(arg), &arg);
+    }
+    TGT_DLLK_LEAVE_CRITICAL_SECTION();
+    return ret;
+}
+#endif
+
 #if defined CONFIG_INCLUDE_NMT_MN
 //------------------------------------------------------------------------------
 /**
@@ -829,8 +864,37 @@ tOplkError dllk_cbCyclicError(tOplkError errorCode_p, tEdrvTxBuffer* pTxBuffer_p
     TGT_DLLK_ENTER_CRITICAL_SECTION();
 
     nmtState = dllkInstance_g.nmtState;
-    if (nmtState <= kNmtGsResetConfiguration)
+    if (!NMT_IF_MN(nmtState))
+    {
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+        if (errorCode_p == kErrorEdrvCurTxListEmpty)
+        {
+            switch (dllkInstance_g.nmtEventGoToStandby)
+            {
+                case kNmtEventGoToStandby:
+                    hrestimer_modifyTimer(&dllkInstance_g.timerHdlSwitchOver,
+                                          (dllkInstance_g.dllConfigParam.switchOverTimeMn -
+                                           dllkInstance_g.dllConfigParam.cycleLen) * 1000ULL,
+                                          dllk_cbTimerSwitchOver, 0L, FALSE);
+                    dllkInstance_g.nmtEventGoToStandby = kNmtEventNoEvent;
+                    break;
+
+                case kNmtEventGoToStandbyDelayed:
+                    hrestimer_modifyTimer(&dllkInstance_g.timerHdlSwitchOver,
+                                          (dllkInstance_g.dllConfigParam.delayedSwitchOverTimeMn -
+                                           dllkInstance_g.dllConfigParam.cycleLen)  * 1000ULL,
+                                          dllk_cbTimerSwitchOver, 0L, FALSE);
+                    dllkInstance_g.nmtEventGoToStandby = kNmtEventNoEvent;
+                    break;
+
+                default:
+                    break;
+            }
+        }
+#endif
+        // ignore errors if not MN
         goto Exit;
+    }
 
     if (pTxBuffer_p != NULL)
     {

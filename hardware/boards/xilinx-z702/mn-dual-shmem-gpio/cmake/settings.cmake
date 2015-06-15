@@ -43,8 +43,9 @@ SET(CFG_DEMO_BOARD_ZYNQ "TRUE")
 # Bus system used in the demo
 SET(CFG_DEMO_BUS_SYSTEM "axi")
 
-# Enable CDC file on SDCARD
-SET(CFG_CDC_ONSDCARD "TRUE")
+# Enable FAT FS support library build
+# Useful when reading CDC file from SDCARD
+SET(CFG_FAT_SUPPORT TRUE)
 
 ################################################################################
 # P R O C E S S O R   F E A T U R E S   ( P C P )
@@ -115,7 +116,7 @@ OPTION(CFG_HOST_ARM_FRAME_AAPCS "ARM core has Stack frame compliant with AAPCS" 
 MARK_AS_ADVANCED(CFG_HOST_ARM_FRAME_AAPCS)
 
 # ARM core should use 4 byte enums
-OPTION(CFG_HOST_ARM_SHORT_ENUMS "ARM core uses 4-bytes enums" ON)
+OPTION(CFG_HOST_ARM_SHORT_ENUMS "ARM core uses 4-bytes enums" OFF)
 MARK_AS_ADVANCED(CFG_HOST_ARM_SHORT_ENUMS)
 
 ################################################################################

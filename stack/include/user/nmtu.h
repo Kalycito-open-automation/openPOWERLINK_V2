@@ -10,7 +10,7 @@ This file contains the definitions for the nmtu module.
 
 /*------------------------------------------------------------------------------
 Copyright (c) 2012, SYSTEC electronic GmbH
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -80,6 +80,7 @@ typedef enum
     kNmtCmdResetCommunication        = 0x29,            ///< NMTResetCommunication command
     kNmtCmdResetConfiguration        = 0x2A,            ///< NMTResetConfiguration command
     kNmtCmdSwReset                   = 0x2B,            ///< NMTSwReset command
+    kNmtCmdGoToStandby               = 0x2C,            ///< NMTGoToStandby command (RMN)
     // extended NMT state commands    0x40..0x5F
     kNmtCmdStartNodeEx               = 0x41,            ///< NMTStartNodeEx command
     kNmtCmdStopNodeEx                = 0x42,            ///< NMTStopNodeEx command
@@ -105,7 +106,14 @@ typedef enum
     kNmtCmdPublishTime               = 0xB0,            ///< NMTPublishTime command
 
     kNmtCmdInvalidService            = 0xFF             ///< NMTInvalidService command
-} tNmtCommand;
+} eNmtCommand;
+
+/**
+\brief NMT command data type
+
+Data type for the enumerator \ref eNmtCommand.
+*/
+typedef UINT32 tNmtCommand;
 
 typedef tOplkError (*tNmtuStateChangeCallback)(tEventNmtStateChange NmtStateChange_p);
 typedef tOplkError (*tNmtuCheckEventCallback)(tNmtEvent NmtEvent_p);
@@ -120,8 +128,7 @@ extern "C"
 #endif
 
 tOplkError      nmtu_init(void);
-tOplkError      nmtu_addInstance(void);
-tOplkError      nmtu_delInstance(void);
+tOplkError      nmtu_exit(void);
 tOplkError      nmtu_postNmtEvent(tNmtEvent nmtEvent_p);
 tNmtState       nmtu_getNmtState(void);
 tOplkError      nmtu_processEvent(tEvent* pEvent_p);

@@ -10,8 +10,8 @@ This file contains the implementation of the user stack control module.
 *******************************************************************************/
 
 /*------------------------------------------------------------------------------
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
-Copyright (c) 2013, SYSTEC electronic GmbH
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, SYSTEC electronic GmbH
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -190,7 +190,7 @@ static tOplkError cbLedStateChange(tLedType LedType_p, BOOL fOn_p);
 static tOplkError cbCfmEventCnProgress(tCfmEventCnProgress* pEventCnProgress_p);
 static tOplkError cbCfmEventCnResult(unsigned int uiNodeId_p, tNmtNodeCommand NodeCommand_p);
 #endif
-void setupRequiredKernelFeatures(void);
+UINT32 getRequiredKernelFeatures(void);
 
 //============================================================================//
 //            P U B L I C   F U N C T I O N S                                 //
@@ -227,7 +227,7 @@ tOplkError ctrlu_init(void)
         goto Exit;
     }
 
-    setupRequiredKernelFeatures();
+    ctrlInstance_l.requiredKernelFeatures = getRequiredKernelFeatures();
     if ((ret = ctrlu_getKernelInfo(&ctrlInstance_l.kernelInfo)) != kErrorOk)
     {
         ctrlucal_exit();
@@ -443,8 +443,8 @@ tOplkError ctrlu_shutdownStack(void)
 #endif
 
 #if defined(CONFIG_INCLUDE_SDOS) || defined(CONFIG_INCLUDE_SDOC)
-    ret = sdocom_delInstance();
-    DEBUG_LVL_CTRL_TRACE("sdocom_delInstance():  0x%X\n", ret);
+    ret = sdocom_exit();
+    DEBUG_LVL_CTRL_TRACE("sdocom_exit():  0x%X\n", ret);
 #endif
 
 #if defined(CONFIG_INCLUDE_LEDU)
@@ -453,23 +453,23 @@ tOplkError ctrlu_shutdownStack(void)
 #endif
 
 #if defined(CONFIG_INCLUDE_NMT_MN)
-    ret = nmtmnu_delInstance();
-    DEBUG_LVL_CTRL_TRACE("nmtmnu_delInstance():  0x%X\n", ret);
+    ret = nmtmnu_exit();
+    DEBUG_LVL_CTRL_TRACE("nmtmnu_exit():  0x%X\n", ret);
 
-    ret = identu_delInstance();
-    DEBUG_LVL_CTRL_TRACE("identu_delInstance():  0x%X\n", ret);
+    ret = identu_exit();
+    DEBUG_LVL_CTRL_TRACE("identu_exit():  0x%X\n", ret);
 
-    ret = statusu_delInstance();
-    DEBUG_LVL_CTRL_TRACE("statusu_delInstance():  0x%X\n", ret);
+    ret = statusu_exit();
+    DEBUG_LVL_CTRL_TRACE("statusu_exit():  0x%X\n", ret);
 
-    ret = syncu_delInstance();
+    ret = syncu_exit();
 #endif
 
-    ret = nmtcnu_delInstance();
-    DEBUG_LVL_CTRL_TRACE("nmtcnu_delInstance():  0x%X\n", ret);
+    ret = nmtcnu_exit();
+    DEBUG_LVL_CTRL_TRACE("nmtcnu_exit():  0x%X\n", ret);
 
-    ret = nmtu_delInstance();
-    DEBUG_LVL_CTRL_TRACE("nmtu_delInstance():    0x%X\n", ret);
+    ret = nmtu_exit();
+    DEBUG_LVL_CTRL_TRACE("nmtu_exit():    0x%X\n", ret);
 
 #if defined(CONFIG_INCLUDE_PDO)
     ret = pdou_exit();
@@ -482,8 +482,8 @@ tOplkError ctrlu_shutdownStack(void)
     ret = errhndu_exit();
     DEBUG_LVL_CTRL_TRACE("errhndu_exit():  0x%X\n", ret);
 
-    ret = timeru_delInstance();
-    DEBUG_LVL_CTRL_TRACE("timeru_delInstance():  0x%X\n", ret);
+    ret = timeru_exit();
+    DEBUG_LVL_CTRL_TRACE("timeru_exit():  0x%X\n", ret);
 
     ret = eventu_exit();
     DEBUG_LVL_CTRL_TRACE("eventu_exit():  0x%X\n", ret);
@@ -496,7 +496,7 @@ tOplkError ctrlu_shutdownStack(void)
     obdcdc_exit();
 #endif
 
-    ret = obd_deleteInstance();
+    ret = obd_exit();
 
     return ret;
 }
@@ -776,8 +776,6 @@ tOplkError ctrlu_cbObdAccess(tObdCbParam MEM* pParam_p)
                 UINT8       cmdTarget;
                 tObdSize    obdSize;
                 tNmtState   nmtState;
-                BYTE*       pCmdData;
-                tObdSize    cmdDataSize;
 
                 obdSize = sizeof(UINT8);
                 ret = obd_readEntry(0x1F9F, 2, &cmdId, &obdSize);
@@ -795,44 +793,20 @@ tOplkError ctrlu_cbObdAccess(tObdCbParam MEM* pParam_p)
                     break;
                 }
 
-                if ((cmdId >= NMT_EXT_COMMAND_START) && (cmdId <= NMT_EXT_COMMAND_END))
-                {
-                    pCmdData = (BYTE*)OPLK_MALLOC(C_MAX_NMT_CMD_DATA_SIZE);
-                    if (pCmdData == NULL)
-                    {
-                        ret = kErrorNoResource;
-                        pParam_p->abortCode = SDO_AC_GENERAL_ERROR;
-                        break;
-                    }
-
-                    cmdDataSize = C_MAX_NMT_CMD_DATA_SIZE;
-                    ret = obd_readEntry(0x1F9F, 4, pCmdData, &cmdDataSize);
-                    if (ret != kErrorOk)
-                    {
-                        OPLK_FREE(pCmdData);
-                        pParam_p->abortCode = SDO_AC_GENERAL_ERROR;
-                        break;
-                    }
-                }
-                else
-                {
-                    cmdDataSize = 0;
-                    pCmdData = NULL;
-                }
-
                 nmtState = nmtu_getNmtState();
 
-                if (nmtState < kNmtMsNotActive)
+                if (NMT_IF_CN_OR_RMN(nmtState))
                 {   // local node is CN
                     // forward the command to the MN
                     // d.k. this is a manufacturer specific feature
-                    ret = nmtcnu_sendNmtRequest(cmdTarget, (tNmtCommand) cmdId);
+                    ret = nmtcnu_sendNmtRequestEx(cmdTarget, (tNmtCommand) cmdId,
+                                                  aCmdData, sizeof(aCmdData));
                 }
                 else
                 {   // local node is MN
                     // directly execute the requested NMT command
                     ret = nmtmnu_requestNmtCommand(cmdTarget, (tNmtCommand) cmdId,
-                                                   pCmdData, cmdDataSize);
+                                                   aCmdData, sizeof(aCmdData));
                 }
                 if (ret != kErrorOk)
                 {
@@ -841,9 +815,6 @@ tOplkError ctrlu_cbObdAccess(tObdCbParam MEM* pParam_p)
 
                 // reset request flag
                 *((UINT8*)pParam_p->pArg) = 0;
-
-                if (pCmdData != NULL)
-                    OPLK_FREE(pCmdData);
             }
             break;
 #endif
@@ -889,6 +860,22 @@ BOOL ctrlu_stackIsInitialized(void)
     return ctrlInstance_l.fInitialized;
 }
 
+//------------------------------------------------------------------------------
+/**
+\brief Returns kernel feature flags
+
+The function returns the configured kernel features that are required by the user library.
+
+\return The function returns the kernel feature flags.
+
+\ingroup module_ctrlu
+*/
+//------------------------------------------------------------------------------
+UINT32 ctrlu_getFeatureFlags(void)
+{
+    return getRequiredKernelFeatures();
+}
+
 //============================================================================//
 //            P R I V A T E   F U N C T I O N S                               //
 //============================================================================//
@@ -912,7 +899,7 @@ static tOplkError initNmtu(tOplkApiInitParam* pInitParam_p)
 
     // initialize NmtCnu module
     DEBUG_LVL_CTRL_TRACE("Initialize NMT_CN module...\n");
-    ret = nmtcnu_addInstance(pInitParam_p->nodeId);
+    ret = nmtcnu_init(pInitParam_p->nodeId);
     if (ret != kErrorOk)
         goto Exit;
 
@@ -1144,6 +1131,9 @@ static tOplkError cbNmtStateChange(tEventNmtStateChange nmtStateChange_p)
         // -> normal Ethernet communication
         case kNmtMsBasicEthernet:
             break;
+
+        case kNmtRmsNotActive:
+          break;
 
         default:
             DEBUG_LVL_CTRL_TRACE("cbNmtStateChange(): unhandled NMT state\n");
@@ -1385,6 +1375,41 @@ static tOplkError updateDllConfig(tOplkApiInitParam* pInitParam_p, BOOL fUpdateI
     dllConfigParam.syncResLatency = pInitParam_p->syncResLatency;
 #endif
 
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+    {
+        UINT32 mnSwitchOverPriority = 0;
+        UINT32 mnSwitchOverDelay = 0;
+        UINT32 mnSwitchOverCycleDivider = 0;
+        UINT32 mnWaitNotAct = 0;
+
+        obdSize = 4;
+        if ((ret = obd_readEntry(0x1F89, 0x0a, &mnSwitchOverPriority, &obdSize)) != kErrorOk)
+            return ret;
+
+        obdSize = 4;
+        if ((ret = obd_readEntry(0x1F89, 0x0b, &mnSwitchOverDelay, &obdSize)) != kErrorOk)
+            return ret;
+
+        obdSize = 4;
+        if ((ret = obd_readEntry(0x1F89, 0x0c, &mnSwitchOverCycleDivider, &obdSize)) != kErrorOk)
+            return ret;
+
+        dllConfigParam.switchOverTimeMn = (UINT32)(dllConfigParam.cycleLen +
+                ((dllConfigParam.cycleLen * ((UINT64)mnSwitchOverPriority)) /
+                mnSwitchOverCycleDivider));
+
+        dllConfigParam.delayedSwitchOverTimeMn = (UINT32)(dllConfigParam.cycleLen +
+                ((dllConfigParam.cycleLen * ((UINT64)mnSwitchOverPriority + mnSwitchOverDelay)) /
+                mnSwitchOverCycleDivider));
+
+        obdSize = 4;
+        if ((ret = obd_readEntry(0x1F89, 0x01, &mnWaitNotAct, &obdSize)) != kErrorOk)
+            return ret;
+
+        dllConfigParam.reducedSwitchOverTimeMn = mnWaitNotAct;
+    }
+#endif
+
     dllConfigParam.fSyncOnPrcNode = pInitParam_p->fSyncOnPrcNode;
     dllConfigParam.syncNodeId = pInitParam_p->syncNodeId;
 
@@ -1587,6 +1612,18 @@ static tOplkError updateObd(tOplkApiInitParam* pInitParam_p)
     if ((pInitParam_p->asyncSlotTimeout != 0) && (pInitParam_p->asyncSlotTimeout != UINT_MAX))
     {
         obd_writeEntry(0x1F8A, 2, &pInitParam_p->asyncSlotTimeout, 4);
+    }
+#endif
+
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+    {
+        UINT32              switchOverPriority;
+
+        if (pInitParam_p->nodeId > C_ADR_MN_DEF_NODE_ID)
+        {
+            switchOverPriority = pInitParam_p->nodeId - C_ADR_MN_DEF_NODE_ID;
+            obd_writeEntry(0x1F89, 0x0a, &switchOverPriority, 4);
+        }
     }
 #endif
 
@@ -1918,45 +1955,54 @@ static tOplkError linkDomainObjects(tLinkObjectRequest* pLinkRequest_p,
 
 //------------------------------------------------------------------------------
 /**
-\brief  Setup required kernel features
+\brief  Get required kernel features
 
-The function sets up the feature which are required from the kernel stack.
+The function returns the features which are required from the kernel stack.
 They will be set depending on the compilation guarded by feature macros
 of the user stack.
+
+\return Returns the required kernel features
+\retval Returns a UINT32 variable with the kernel feature flags.
 */
 //------------------------------------------------------------------------------
-void setupRequiredKernelFeatures(void)
+UINT32 getRequiredKernelFeatures(void)
 {
-    ctrlInstance_l.requiredKernelFeatures = 0;
+    UINT32          requiredKernelFeatures = 0;
 
 #if defined(CONFIG_INCLUDE_NMT_MN)
     // We do have NMT functionality compiled in and therefore need an MN
     // kernel stack
-    ctrlInstance_l.requiredKernelFeatures |= OPLK_KERNEL_MN;
+    requiredKernelFeatures |= OPLK_KERNEL_MN;
 #endif
 
 #if defined(CONFIG_INCLUDE_PDO)
     // We contain the PDO module for isochronous transfers and therefore need
     // a kernel module which can handle isochronous transfers.
-    ctrlInstance_l.requiredKernelFeatures |= OPLK_KERNEL_ISOCHR;
+    requiredKernelFeatures |= OPLK_KERNEL_ISOCHR;
 #endif
 
 #if defined(CONFIG_INCLUDE_PRES_FORWARD)
     // We contain the PRES forwarding module (used for diagnosis) and therefore
     // need a kernel whith this feature.
-    ctrlInstance_l.requiredKernelFeatures |= OPLK_KERNEL_PRES_FORWARD;
+    requiredKernelFeatures |= OPLK_KERNEL_PRES_FORWARD;
 #endif
 
 #if defined(CONFIG_INCLUDE_VETH)
     // We contain the virtual ethernet module and therefore need a kernel
     // which supports virtual ethernet.
-    ctrlInstance_l.requiredKernelFeatures |= OPLK_KERNEL_VETH;
+    requiredKernelFeatures |= OPLK_KERNEL_VETH;
+#endif
+
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+    // We contain the code for the redundancy MN (RMN)
+    requiredKernelFeatures |= OPLK_KERNEL_RMN;
 #endif
 
 #if (CONFIG_DLL_PRES_CHAINING_CN == TRUE)
-    ctrlInstance_l.requiredKernelFeatures |= OPLK_KERNEL_PRES_CHAINING_CN;
+    requiredKernelFeatures |= OPLK_KERNEL_PRES_CHAINING_CN;
 #endif
 
+    return requiredKernelFeatures;
 }
 
 /// \}

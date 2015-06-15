@@ -10,7 +10,7 @@ This file contains definitions used by openMAC Ethernet and timer drivers.
 
 /*------------------------------------------------------------------------------
 Copyright (c) 2013, SYSTEC electronic GmbH
-Copyright (c) 2013, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -45,6 +45,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <openmac_cfg.h>
 #include <omethlib.h>
 
+#if (DEV_SYSTEM == _DEV_NIOS2_)
+#include "openmac-nios2.h"
+#elif ((DEV_SYSTEM == _DEV_MICROBLAZE_LITTLE_) || (DEV_SYSTEM == _DEV_MICROBLAZE_BIG_))
+#include "openmac-microblaze.h"
+#else
+#error "Target-specific implementation for openMAC not available!"
+#endif
+
 //------------------------------------------------------------------------------
 // check for correct compilation options
 //------------------------------------------------------------------------------
@@ -65,7 +73,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define EDRV_MAX_RX_BUFFERS         16      ///< Number of supported Rx buffers
 #define EDRV_MAX_FILTERS            16      ///< Number of supported Rx Filters
 #define EDRV_MAX_AUTO_RESPONSES     14      ///< Number of supported auto-response
-#define EDRV_MAX_TX_BUF2            16      ///< Length of 2nd Tx queue
 
 #define HWTIMER_SYNC            0   ///< Sync hardware timer
 #define HWTIMER_EXT_SYNC        1   ///< External sync hardware timer
@@ -91,7 +98,14 @@ typedef enum
     kOpenmacIrqSync     = 0,    ///< Sync timer Irq
     kOpenmacIrqTxRx     = 1,    ///< Mac Irq (Tx and Rx)
     kOpenmacIrqLast             ///< Dummy, count of valid interrupt sources
-} tOpenmacIrqSource;
+} eOpenmacIrqSource;
+
+/**
+\brief openMAC IRQ source data type
+
+Data type for the enumerator \ref eOpenmacIrqSource.
+*/
+typedef UINT32 tOpenmacIrqSource;
 
 //------------------------------------------------------------------------------
 // global variable declarations
@@ -108,18 +122,8 @@ extern "C"
 
 tOplkError openmac_isrReg(tOpenmacIrqSource irqSource_p, tOpenmacIrqCb pfnIsrCb_p, void* pArg_p);
 
-UINT8* openmac_memUncached(UINT8* pMem_p, UINT size_p);
 UINT8* openmac_uncachedMalloc(UINT size_p);
 void openmac_uncachedFree(UINT8* pMem_p);
-void openmac_flushDataCache(UINT8* pMem_p, UINT size_p);
-void openmac_invalidateDataCache(UINT8* pMem_p, UINT size_p);
-
-UINT16 openmac_getDmaObserver(UINT adapter_p);
-
-void openmac_timerIrqDisable(UINT timer_p);
-void openmac_timerIrqEnable(UINT timer_p, UINT32 pulseWidthNs_p);
-void openmac_timerSetCompareValue(UINT timer_p, UINT32 val_p);
-UINT32 openmac_timerGetTimeValue(UINT timer_p);
 
 #ifdef __cplusplus
 }

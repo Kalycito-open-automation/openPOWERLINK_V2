@@ -50,6 +50,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <oplk/debugstr.h>
 
+Q_DECLARE_METATYPE(tSdoComFinished)
+
 //------------------------------------------------------------------------------
 // global variables
 //------------------------------------------------------------------------------
@@ -100,6 +102,7 @@ Constructs a ProcessThread object
 //------------------------------------------------------------------------------
 ProcessThread::ProcessThread(MainWindow* pMainWindow_p)
 {
+    qRegisterMetaType<tSdoComFinished>();
     pProcessThread_g = this;
     pMainWindow = pMainWindow_p;
 
@@ -242,6 +245,10 @@ void ProcessThread::sigNmtState(tNmtState State_p)
             strState = "MN Basic Ethernet";
             break;
 
+        case kNmtRmsNotActive:
+            strState = "RMN Not Active";
+            break;
+
         default:
             strState = "??? (0x";
             strState += QString::number(State_p, 16);
@@ -353,7 +360,15 @@ tOplkError ProcessThread::processEvent(tOplkApiEventType EventType_p,
         case kOplkApiEventSdo:
             ret = processSdoEvent(EventType_p, pEventArg_p, pUserArg_p);
             break;
+#else
+        case kOplkApiEventSdo:
+            emit sdoFinished(pEventArg_p->sdoInfo);
+            break;
 #endif
+
+        case kOplkApiEventUserDef:
+            emit userDefEvent(pEventArg_p->pUserArg);
+
         default:
             break;
     }
@@ -387,14 +402,17 @@ tOplkError ProcessThread::processStateChangeEvent(tOplkApiEventType EventType_p,
 #if !defined(CONFIG_INCLUDE_CFM)
     UINT                        varLen;
 #endif
-    const char*                 string;
     QString                     str;
 
     UNUSED_PARAMETER(EventType_p);
     UNUSED_PARAMETER(pUserArg_p);
 
     sigNmtState(pNmtStateChange->newNmtState);
-    string = debugstr_getNmtEventStr(pNmtStateChange->nmtEvent);
+
+    sigPrintLog(QString("StateChangeEvent %1: %2 -> %3")
+                        .arg(debugstr_getNmtEventStr(pNmtStateChange->nmtEvent))
+                        .arg(debugstr_getNmtStateStr(pNmtStateChange->oldNmtState))
+                        .arg(debugstr_getNmtStateStr(pNmtStateChange->newNmtState)));
 
     switch (pNmtStateChange->newNmtState)
     {
@@ -408,10 +426,6 @@ tOplkError ProcessThread::processStateChangeEvent(tOplkApiEventType EventType_p,
             // and unblock DataInDataOutThread
             oplk_freeProcessImage(); //jba do we need it here?
 
-            sigPrintLog(QString("StateChangeEvent(0x%1) originating event = 0x%2 (%3)")
-                                .arg(pNmtStateChange->newNmtState, 0, 16, QLatin1Char('0'))
-                                .arg(pNmtStateChange->nmtEvent, 0, 16, QLatin1Char('0'))
-                                .arg(debugstr_getNmtEventStr(pNmtStateChange->nmtEvent)));
             reachedNmtStateOff();
             break;
 
@@ -420,10 +434,6 @@ tOplkError ProcessThread::processStateChangeEvent(tOplkApiEventType EventType_p,
             ret = setDefaultNodeAssignment();
 #endif
             pProcessThread_g->sigOplkStatus(1);
-            sigPrintLog(QString("StateChangeEvent(0x%1) originating event = 0x%2 (%3)")
-                                .arg(pNmtStateChange->newNmtState, 4, 16, QLatin1Char('0'))
-                                .arg(pNmtStateChange->nmtEvent, 4, 16, QLatin1Char('0'))
-                                .arg(debugstr_getNmtEventStr(pNmtStateChange->nmtEvent)));
             break;
 
         case kNmtGsResetConfiguration:
@@ -444,14 +454,11 @@ tOplkError ProcessThread::processStateChangeEvent(tOplkApiEventType EventType_p,
             }
 #endif
             sigOplkStatus(1);
-            sigPrintLog(QString("StateChangeEvent(0x%1) originating event = 0x%2 (%3)")
-                                .arg(pNmtStateChange->newNmtState, 4, 16, QLatin1Char('0'))
-                                .arg(pNmtStateChange->nmtEvent, 4, 16, QLatin1Char('0'))
-                                .arg(debugstr_getNmtEventStr(pNmtStateChange->nmtEvent)));
             break;
 
         case kNmtCsNotActive:
         case kNmtMsNotActive:
+        case kNmtRmsNotActive:
         case kNmtGsInitialising:
         case kNmtGsResetApplication:
         case kNmtCsPreOperational1:
@@ -462,19 +469,11 @@ tOplkError ProcessThread::processStateChangeEvent(tOplkApiEventType EventType_p,
         case kNmtMsReadyToOperate:
         case kNmtCsBasicEthernet:
         case kNmtMsBasicEthernet:
-            sigPrintLog(QString("StateChangeEvent(0x%1) originating event = 0x%2 (%3)")
-                                .arg(pNmtStateChange->newNmtState, 4, 16, QLatin1Char('0'))
-                                .arg(pNmtStateChange->nmtEvent, 4, 16, QLatin1Char('0'))
-                                .arg(debugstr_getNmtEventStr(pNmtStateChange->nmtEvent)));
             sigOplkStatus(1);
             break;
 
         case kNmtCsOperational:
         case kNmtMsOperational:
-            sigPrintLog(QString("StateChangeEvent(0x%1) originating event = 0x%2 (%3)")
-                                .arg(pNmtStateChange->newNmtState, 4, 16, QLatin1Char('0'))
-                                .arg(pNmtStateChange->nmtEvent, 4, 16, QLatin1Char('0'))
-                                .arg(debugstr_getNmtEventStr(pNmtStateChange->nmtEvent)));
             sigOplkStatus(2);
             break;
 
@@ -729,6 +728,7 @@ tOplkError ProcessThread::processNodeEvent(tOplkApiEventType EventType_p,
                     break;
 
                 case kNmtCsOperational:
+                    pProcessThread_g->sigNodeAppeared(pEventArg_p->nodeEvent.nodeId);
                     pProcessThread_g->sigNodeStatus(pEventArg_p->nodeEvent.nodeId, 2);
                     break;
 
@@ -746,6 +746,11 @@ tOplkError ProcessThread::processNodeEvent(tOplkApiEventType EventType_p,
                                 .arg(pEventArg_p->nodeEvent.nodeId, 0, 10)
                                 .arg(debugstr_getEmergErrCodeStr(pEventArg_p->nodeEvent.errorCode))
                                 .arg(pEventArg_p->nodeEvent.errorCode, 4, 16, QLatin1Char('0')));
+            break;
+
+        case kNmtNodeEventAmniReceived:
+            sigPrintLog(QString("AppCbEvent (Node=%1): received ActiveManagingNodeIndication")
+                                .arg(pEventArg_p->nodeEvent.nodeId, 0, 10));
             break;
 
         default:

@@ -11,7 +11,7 @@ This file contains the frame processing functions of the kernel DLL module.
 
 /*------------------------------------------------------------------------------
 Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
-Copyright (c) 2013, SYSTEC electronic GmbH
+Copyright (c) 2015, SYSTEC electronic GmbH
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -51,6 +51,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <kernel/dllkcal.h>
 #include <kernel/eventk.h>
 #include <kernel/errhndk.h>
+#include <kernel/edrvcyclic.h>
 
 #if CONFIG_TIMER_USE_HIGHRES != FALSE
 #include <kernel/hrestimer.h>
@@ -110,6 +111,11 @@ static tOplkError processReceivedPreq(tFrameInfo* pFrameInfo_p, tNmtState nmtSta
 static tOplkError processReceivedPres(tFrameInfo* pFrameInfo_p, tNmtState nmtState_p,
                                       tNmtEvent* pNmtEvent_p, tEdrvReleaseRxBuffer* pReleaseRxBuffer_p);
 static tOplkError processReceivedSoc(tEdrvRxBuffer* pRxBuffer_p, tNmtState nmtState_p);
+
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+static tOplkError processReceivedAmni(tEdrvRxBuffer* pRxBuffer_p, tNmtState nmtState_p);
+#endif
+
 static tOplkError processReceivedSoa(tEdrvRxBuffer* pRxBuffer_p, tNmtState nmtState_p);
 static tOplkError processReceivedAsnd(tFrameInfo* pFrameInfo_p, tEdrvRxBuffer* pRxBuffer_p,
                                       tNmtState nmtState_p, tEdrvReleaseRxBuffer* pReleaseRxBuffer_p);
@@ -120,7 +126,7 @@ static BOOL       presFrameFormatIsInvalid(tFrameInfo* pFrameInfo_p, tDllkNodeIn
 
 #if defined(CONFIG_INCLUDE_NMT_MN)
 static tOplkError checkAndSetSyncEvent(BOOL fPrcSlotFinished_p, UINT nodeId_p);
-static tOplkError updateNode(tDllkNodeInfo* pIntNodeInfo_p, UINT nodeId_p, tNmtState nodeNmtState_p);
+static tOplkError updateNode(tDllkNodeInfo* pIntNodeInfo_p, UINT nodeId_p, tNmtState nodeNmtState_p, UINT8* pMacAddr_p);
 static tOplkError searchNodeInfo(UINT nodeId_p, tDllkNodeInfo** ppIntNodeInfo_p, BOOL* pfPrcSlotFinished_p);
 static void       handleErrorSignaling(tPlkFrame* pFrame_p, UINT nodeId_p);
 #endif
@@ -267,6 +273,15 @@ tEdrvReleaseRxBuffer dllkframe_processFrameReceived(tEdrvRxBuffer* pRxBuffer_p)
                 goto Exit;
             break;
 
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+        case kMsgTypeAmni:
+            nmtEvent = kNmtEventDllReAmni;
+            ret = processReceivedAmni(pRxBuffer_p, nmtState);
+            if (ret != kErrorOk)
+                goto Exit;
+            break;
+#endif
+
 #if defined(CONFIG_INCLUDE_MASND)
         case kMsgTypeAInv:
             nmtEvent = kNmtEventDllCeAInv;
@@ -357,7 +372,7 @@ void dllkframe_processTransmittedNmtReq(tEdrvTxBuffer* pTxBuffer_p)
         goto Exit;
 
 #if defined(CONFIG_INCLUDE_NMT_MN)
-    if (nmtState >= kNmtMsNotActive)
+    if (NMT_IF_ACTIVE_MN(nmtState))
     {
         tPlkFrame* pTxFrame;
 
@@ -528,7 +543,7 @@ tOplkError dllkframe_updateFrameIdentRes(tEdrvTxBuffer* pTxBuffer_p,
     ami_setUint8Le(&pTxFrame->data.asnd.payload.identResponse.flag2, dllkInstance_g.flag2);
 
 #if (CONFIG_EDRV_AUTO_RESPONSE != FALSE)
-    if (nmtState_p < kNmtMsNotActive)
+    if (NMT_IF_CN_OR_RMN(nmtState_p))
     {
         ret = edrv_updateTxBuffer(pTxBuffer_p);
     }
@@ -563,7 +578,7 @@ tOplkError dllkframe_updateFrameStatusRes(tEdrvTxBuffer* pTxBuffer_p,
     ami_setUint8Le(&pTxFrame->data.asnd.payload.statusResponse.flag1, dllkInstance_g.flag1);
 
 #if (CONFIG_EDRV_AUTO_RESPONSE != FALSE)
-    if (nmtState_p < kNmtMsNotActive)
+    if (NMT_IF_CN_OR_RMN(nmtState_p))
     {
         ret = edrv_updateTxBuffer(pTxBuffer_p);
     }
@@ -819,6 +834,12 @@ tOplkError dllkframe_createTxFrame(UINT* pHandle_p, UINT* pFrameSize_p,
             handle = DLLK_TXFRAME_PRES;
             break;
 
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+        case kMsgTypeAmni:
+            handle = DLLK_TXFRAME_AMNI;
+            break;
+#endif
+
 #if defined(CONFIG_INCLUDE_NMT_MN)
         case kMsgTypeSoc:
             handle = DLLK_TXFRAME_SOC;
@@ -983,19 +1004,35 @@ tOplkError dllkframe_createTxFrame(UINT* pHandle_p, UINT* pFrameSize_p,
                     ami_setUint8Le(&pTxFrame->dstNodeId, (BYTE)C_ADR_BROADCAST);
                     break;
 
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+                case kMsgTypeAmni:
+                    ami_setUint48Be(&pTxFrame->aDstMac[0], C_DLL_MULTICAST_AMNI);
+                    ami_setUint8Le(&pTxFrame->dstNodeId, (BYTE)C_ADR_BROADCAST);
+                    break;
+#endif
+
 #if defined(CONFIG_INCLUDE_NMT_MN)
                 case kMsgTypeSoc:
+                    ami_setUint8Le(&pTxFrame->srcNodeId, (BYTE)C_ADR_MN_DEF_NODE_ID);
                     ami_setUint48Be(&pTxFrame->aDstMac[0], C_DLL_MULTICAST_SOC);
                     ami_setUint8Le(&pTxFrame->dstNodeId, (BYTE)C_ADR_BROADCAST);
                     break;
 
                 case kMsgTypeSoa:
+                    ami_setUint8Le(&pTxFrame->srcNodeId, (BYTE)C_ADR_MN_DEF_NODE_ID);
                     ami_setUint48Be(&pTxFrame->aDstMac[0], C_DLL_MULTICAST_SOA);
                     ami_setUint8Le(&pTxFrame->dstNodeId, (BYTE)C_ADR_BROADCAST);
                     ami_setUint8Le(&pTxFrame->data.soa.powerlinkVersion, (BYTE)PLK_SPEC_VERSION);
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+                    if (dllkInstance_g.fRedundancy)
+                    {
+                        ami_setUint8Le(&pTxFrame->data.soa.flag3, (BYTE)PLK_FRAME_FLAG3_MR);
+                    }
+#endif
                     break;
 
                 case kMsgTypePreq:
+                    ami_setUint8Le(&pTxFrame->srcNodeId, (BYTE)C_ADR_MN_DEF_NODE_ID);
                     break;
 #endif
 
@@ -1713,7 +1750,7 @@ static tOplkError processReceivedPreq(tFrameInfo* pFrameInfo_p, tNmtState nmtSta
 
     pFrame = pFrameInfo_p->pFrame;
 
-    if (nmtState_p >= kNmtMsNotActive)
+    if (!NMT_IF_ACTIVE_CN(nmtState_p))
     {   // MN is active -> wrong msg type
         goto Exit;
     }
@@ -1921,6 +1958,13 @@ static tOplkError processReceivedPres(tFrameInfo* pFrameInfo_p, tNmtState nmtSta
         {   // no node info structure available
             return kErrorDllNoNodeInfo;
         }
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+        if (dllkInstance_g.fRedundancy)
+        {
+            if ((ret = updateNode(pIntNodeInfo, nodeId, nodeNmtState, pFrame->aSrcMac)) != kErrorOk)
+                return ret;
+        }
+#endif
 #endif
     }
     else
@@ -1950,7 +1994,7 @@ static tOplkError processReceivedPres(tFrameInfo* pFrameInfo_p, tNmtState nmtSta
             if (ret != kErrorOk)
                 return ret;
 
-            if ((ret = updateNode(pIntNodeInfo, nodeId, nodeNmtState)) != kErrorOk)
+            if ((ret = updateNode(pIntNodeInfo, nodeId, nodeNmtState, NULL)) != kErrorOk)
                 return ret;
         }
         else
@@ -2029,6 +2073,7 @@ The function processes a received SoC frame.
 static tOplkError processReceivedSoc(tEdrvRxBuffer* pRxBuffer_p, tNmtState nmtState_p)
 {
     tOplkError      ret = kErrorOk;
+    tPlkFrame*      pFrame;
 #if CONFIG_DLL_PRES_READY_AFTER_SOC != FALSE
     tEdrvTxBuffer*  pTxBuffer = NULL;
 #endif
@@ -2037,10 +2082,13 @@ static tOplkError processReceivedSoc(tEdrvRxBuffer* pRxBuffer_p, tNmtState nmtSt
     UNUSED_PARAMETER(pRxBuffer_p);
 #endif
 
-    if (nmtState_p >= kNmtMsNotActive)
+    if (!NMT_IF_ACTIVE_CN(nmtState_p))
     {   // MN is active -> wrong msg type
         return ret;
     }
+
+    pFrame = (tPlkFrame*)pRxBuffer_p->pBuffer;
+    dllkInstance_g.relativeTime = ami_getUint64Le(&pFrame->data.soc.relativeTimeLe);
 
 #if CONFIG_DLL_PRES_READY_AFTER_SOC != FALSE
     // post PRes to transmit FIFO of the ethernet controller, but don't start
@@ -2077,6 +2125,26 @@ static tOplkError processReceivedSoc(tEdrvRxBuffer* pRxBuffer_p, tNmtState nmtSt
 
     // reprogram timer
 #if CONFIG_TIMER_USE_HIGHRES != FALSE
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+    if (dllkInstance_g.fRedundancy)
+    {
+        if (nmtState_p == kNmtCsOperational)
+        {
+            hrestimer_modifyTimer(&dllkInstance_g.timerHdlSwitchOver,
+                                  dllkInstance_g.dllConfigParam.switchOverTimeMn * 1000ULL,
+                                  dllk_cbTimerSwitchOver, 0L, FALSE);
+        }
+        else
+        {
+            hrestimer_modifyTimer(&dllkInstance_g.timerHdlSwitchOver,
+                                  dllkInstance_g.dllConfigParam.delayedSwitchOverTimeMn * 1000ULL,
+                                  dllk_cbTimerSwitchOver, 0L, FALSE);
+        }
+        if ((ret = edrvcyclic_startCycle()) != kErrorOk)
+            return ret;
+    }
+    else
+#endif
     if (dllkInstance_g.frameTimeout != 0)
     {
         hrestimer_modifyTimer(&dllkInstance_g.timerHdlCycle, dllkInstance_g.frameTimeout,
@@ -2085,6 +2153,65 @@ static tOplkError processReceivedSoc(tEdrvRxBuffer* pRxBuffer_p, tNmtState nmtSt
 #endif
     return ret;
 }
+
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+//------------------------------------------------------------------------------
+/**
+\brief  Process received AMNI frame
+
+The function processes a received AMNI frame.
+
+\param  pRxBuffer_p         Pointer to RxBuffer structure of received frame.
+\param  nmtState_p          NMT state of the local node.
+
+\return The function returns a tOplkError error code.
+*/
+//------------------------------------------------------------------------------
+static tOplkError processReceivedAmni(tEdrvRxBuffer* pRxBuffer_p, tNmtState nmtState_p)
+{
+    tOplkError      ret = kErrorOk;
+    tPlkFrame*      pFrame;
+    tEvent          event;
+    UINT            nodeId;
+
+    pFrame = (tPlkFrame*)pRxBuffer_p->pBuffer;
+    nodeId = ami_getUint8Le(&pFrame->srcNodeId);
+
+    event.eventSink = kEventSinkNmtMnu;
+    event.eventType = kEventTypeReceivedAmni;
+    event.eventArgSize = sizeof(nodeId);
+    event.pEventArg = &nodeId;
+    ret = eventk_postEvent(&event);
+
+    if (!NMT_IF_ACTIVE_CN(nmtState_p))
+    {   // not a Standby Managing Node
+        return ret;
+    }
+
+    // reprogram timer
+    if (dllkInstance_g.fRedundancy)
+    {
+        ULONGLONG   switchOverTime;
+
+        switch (nmtState_p)
+        {
+            case kNmtCsPreOperational1:
+                switchOverTime = dllkInstance_g.dllConfigParam.reducedSwitchOverTimeMn * 1000ULL;
+                break;
+            case kNmtCsOperational:
+                switchOverTime = dllkInstance_g.dllConfigParam.switchOverTimeMn * 1000ULL;
+                break;
+            default:
+                switchOverTime = dllkInstance_g.dllConfigParam.delayedSwitchOverTimeMn * 1000ULL;
+                break;
+        }
+
+        hrestimer_modifyTimer(&dllkInstance_g.timerHdlSwitchOver, switchOverTime,
+                              dllk_cbTimerSwitchOver, 0L, FALSE);
+    }
+    return ret;
+}
+#endif
 
 //------------------------------------------------------------------------------
 /**
@@ -2112,13 +2239,10 @@ static tOplkError processReceivedSoa(tEdrvRxBuffer* pRxBuffer_p, tNmtState nmtSt
 
     pFrame = (tPlkFrame*)pRxBuffer_p->pBuffer;
 
-    if (nmtState_p >= kNmtMsNotActive)
-    {   // MN is active -> wrong msg type
-        goto Exit;
-    }
-
-    if ((nmtState_p & NMT_SUPERSTATE_MASK) != NMT_CS_PLKMODE)
-    {   // do not respond, if NMT state is < PreOp1 (i.e. not in a POWERLINK mode)
+    if (!NMT_IF_ACTIVE_CN(nmtState_p))
+    {   // do not respond,
+        // if NMT state is < PreOp1 (i.e. not in a POWERLINK mode)
+        // or node is MN
         goto Exit;
     }
 
@@ -2402,6 +2526,16 @@ static tOplkError processReceivedSoa(tEdrvRxBuffer* pRxBuffer_p, tNmtState nmtSt
     // $$$ put SrcNodeId, NMT state and NetTime as HeartbeatEvent into eventqueue
     // $$$ inform emergency protocol handling about flags
 
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+    if ((dllkInstance_g.fRedundancy) &&
+        (nmtState_p == kNmtCsPreOperational1))
+    {
+        hrestimer_modifyTimer(&dllkInstance_g.timerHdlSwitchOver,
+                              dllkInstance_g.dllConfigParam.reducedSwitchOverTimeMn * 1000ULL,
+                              dllk_cbTimerSwitchOver, 0L, FALSE);
+    }
+#endif
+
 Exit:
     return ret;
 }
@@ -2653,12 +2787,14 @@ DLLK module.
                             be updated.
 \param  nodeId_p            Node ID of the node to be updated.
 \param  nodeNmtState_p      NMT state of the node to be updated.
+\param  pMacAddr_p          Pointer to MAC address of node, if it shall be
+                            stored in node information
 
 \return The function returns a tOplkError error code.
 */
 //------------------------------------------------------------------------------
 static tOplkError updateNode(tDllkNodeInfo* pIntNodeInfo_p, UINT nodeId_p,
-                             tNmtState nodeNmtState_p)
+                             tNmtState nodeNmtState_p, UINT8* pMacAddr_p)
 {
     tOplkError          ret = kErrorOk;
     tHeartbeatEvent     heartbeatEvent;
@@ -2674,6 +2810,10 @@ static tOplkError updateNode(tDllkNodeInfo* pIntNodeInfo_p, UINT nodeId_p,
 
         if (!pIntNodeInfo_p->fSoftDelete)
         {   // normal isochronous CN
+            if (pMacAddr_p != NULL)
+            {
+                OPLK_MEMCPY(pIntNodeInfo_p->aMacAddr, pMacAddr_p, 6);
+            }
             heartbeatEvent.nodeId = nodeId_p;
             event.eventSink = kEventSinkNmtMnu;
             event.eventType = kEventTypeHeartbeat;

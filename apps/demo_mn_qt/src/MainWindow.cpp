@@ -44,6 +44,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "Api.h"
 #include "Input.h"
 #include "Output.h"
+#include "NmtCommandDialog.h"
 
 #ifdef CONFIG_USE_PCAP
 #include "InterfaceSelectDialog.h"
@@ -66,6 +67,7 @@ MainWindow::MainWindow(QWidget* parent)
     : QWidget(parent)
 {
     pApi = NULL;
+    nmtEvent = kNmtEventResetNode;
 
     resize(1000, 600);
 
@@ -83,6 +85,13 @@ MainWindow::MainWindow(QWidget* parent)
     pLabel = new QLabel();
     pLabel->setPixmap(*pLogo);
     pHeadRegion->addWidget(pLabel, 1, Qt::AlignLeft);
+
+    version = oplk_getVersion();
+    QLabel* pVersion = new QLabel("openPOWERLINK MN QT Demo\nVersion "
+                                  + QString::number(PLK_STACK_VER(version))+ "."
+                                  + QString::number(PLK_STACK_REF(version)) + "."
+                                  + QString::number(PLK_STACK_REL(version)));
+    pHeadRegion->addWidget(pVersion, Qt::AlignCenter,Qt::AlignLeft);
 
     pWindowLayout->addLayout(pHeadRegion);
     pWindowLayout->addSpacing(10);
@@ -163,6 +172,15 @@ MainWindow::MainWindow(QWidget* parent)
     pFootRegion->addWidget(pStartStopOplk);
     connect(pStartStopOplk, SIGNAL(clicked()), this, SLOT(startPowerlink()));
 
+    pShowSdoDialog = new QPushButton(tr("SDO..."));
+    pFootRegion->addWidget(pShowSdoDialog);
+    connect(pShowSdoDialog, SIGNAL(clicked()), this, SLOT(showSdoDialog()));
+
+    pNmtCmd = new QPushButton(tr("Exec NMT command"));
+    pNmtCmd->setEnabled(false);
+    pFootRegion->addWidget(pNmtCmd);
+    connect(pNmtCmd, SIGNAL(clicked()), this, SLOT(execNmtCmd()));
+
     pFootRegion->addStretch();
 
     pToggleMax = new QPushButton(tr("Full Screen"));
@@ -220,12 +238,11 @@ void MainWindow::startPowerlink()
 {
     bool fConvOk;
     unsigned int nodeId;
-    QString devName;
 
 #if defined(CONFIG_USE_PCAP)
     // start the selection dialog
     InterfaceSelectDialog* pInterfaceDialog = new InterfaceSelectDialog();
-    if (pInterfaceDialog->fillList() < 0)
+    if (pInterfaceDialog->fillList(devName) < 0)
     {
         QMessageBox::warning(this, "PCAP not working!",
                              "No PCAP interfaces found!\n"
@@ -252,6 +269,8 @@ void MainWindow::startPowerlink()
         nodeId = Api::defaultNodeId();
     }
 
+    pNmtCmd->setEnabled(true);
+
     // change the button to stop
     pStartStopOplk->setText(tr("Stop POWERLINK"));
     pStartStopOplk->disconnect(this, SLOT(startPowerlink()));
@@ -259,6 +278,14 @@ void MainWindow::startPowerlink()
 
     pApi = new Api(this, nodeId, devName);
 
+    if (pSdoDialog)
+    {
+        QObject::connect(pApi, SIGNAL(userDefEvent(void*)),
+                         pSdoDialog, SLOT(userDefEvent(void*)),
+                         Qt::DirectConnection);
+        QObject::connect(pApi, SIGNAL(sdoFinished(tSdoComFinished)),
+                         pSdoDialog, SLOT(sdoFinished(tSdoComFinished)));
+    }
 }
 
 //------------------------------------------------------------------------------
@@ -275,6 +302,69 @@ void MainWindow::stopPowerlink()
     pStartStopOplk->disconnect(this, SLOT(stopPowerlink()));
     connect(pStartStopOplk, SIGNAL(clicked()), this, SLOT(startPowerlink()));
     pNodeIdEdit->setEnabled(true);
+    pNmtCmd->setEnabled(false);
+
+}
+
+//------------------------------------------------------------------------------
+/**
+\brief  Execute NMT command dialog
+
+Execute NMT command/event entered in dialog.
+*/
+//------------------------------------------------------------------------------
+void MainWindow::execNmtCmd()
+{
+    NmtCommandDialog* pDialog = new NmtCommandDialog(nmtEvent);
+
+    if (pDialog->exec() == QDialog::Rejected)
+    {
+        delete pDialog;
+        return;
+    }
+
+    nmtEvent = pDialog->getNmtEvent();
+    delete pDialog;
+
+    if (nmtEvent == kNmtEventNoEvent)
+    {
+        return;
+    }
+
+    oplk_execNmtCommand(nmtEvent);
+}
+
+//------------------------------------------------------------------------------
+/**
+\brief  Show SDO dialog
+
+Show dialog to perform SDO transfers.
+*/
+//------------------------------------------------------------------------------
+void MainWindow::showSdoDialog()
+{
+    if (!pSdoDialog)
+    {
+        pSdoDialog = new SdoDialog();
+        if (pApi)
+        {
+            QObject::connect(pApi, SIGNAL(userDefEvent(void*)),
+                             pSdoDialog, SLOT(userDefEvent(void*)),
+                             Qt::DirectConnection);
+            QObject::connect(pApi, SIGNAL(sdoFinished(tSdoComFinished)),
+                             pSdoDialog, SLOT(sdoFinished(tSdoComFinished)));
+        }
+    }
+    if (pSdoDialog->isVisible())
+    {
+        pSdoDialog->showNormal();
+        pSdoDialog->activateWindow();
+        pSdoDialog->raise();
+    }
+    else
+    {
+        pSdoDialog->show();
+    }
 }
 
 //------------------------------------------------------------------------------

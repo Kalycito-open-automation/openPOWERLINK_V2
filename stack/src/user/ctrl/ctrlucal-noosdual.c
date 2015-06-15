@@ -58,7 +58,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //------------------------------------------------------------------------------
 // const defines
 //------------------------------------------------------------------------------
-#define CMD_TIMEOUT_SEC     20 // command timeout in seconds
+#define CMD_TIMEOUT_SEC                 20      // command timeout in seconds
+#define DPSHM_ENABLE_TIMEOUT_SEC        10      // wait for dpshm interface enable time out
 
 //------------------------------------------------------------------------------
 // module global vars
@@ -120,6 +121,7 @@ tOplkError ctrlucal_init(void)
 {
     tDualprocReturn     dualRet;
     tDualprocConfig     dualProcConfig;
+    INT                 loopCount = 0;
 
     OPLK_MEMSET(&instance_l, 0, sizeof(tCtrluCalInstance));
 
@@ -134,6 +136,21 @@ tOplkError ctrlucal_init(void)
         DEBUG_LVL_ERROR_TRACE("%s Could not create dual processor driver instance (0x%X)\n",
                               __func__, dualRet);
         dualprocshm_delete(instance_l.dualProcDrvInst);
+        return kErrorNoResource;
+    }
+
+    for (loopCount = 0; loopCount <= DPSHM_ENABLE_TIMEOUT_SEC; loopCount++)
+    {
+        target_msleep(1000U);
+        dualRet = dualprocshm_checkShmIntfState(instance_l.dualProcDrvInst);
+        if (dualRet != kDualprocshmIntfDisabled)
+            break;
+    }
+
+    if (dualRet != kDualprocshmIntfEnabled)
+    {
+        DEBUG_LVL_ERROR_TRACE("%s dualprocshm  interface is not enabled (0x%X)\n",
+                              __func__, dualRet);
         return kErrorNoResource;
     }
 
@@ -254,13 +271,13 @@ it tries to shutdown.
 //------------------------------------------------------------------------------
 tOplkError ctrlucal_checkKernelStack(void)
 {
-    tDualprocReturn dualRet;
-    UINT16          kernelStatus;
-    tOplkError      ret;
-    UINT16          magic;
-    UINT16          retVal;
-    UINT32          timeout = 0;
-    BOOL            fExit = FALSE;
+    tDualprocReturn     dualRet;
+    tCtrlKernelStatus   kernelStatus;
+    tOplkError          ret;
+    UINT16              magic;
+    UINT16              retVal;
+    UINT32              timeout = 0;
+    BOOL                fExit = FALSE;
 
     DEBUG_LVL_CTRL_TRACE("Checking for kernel stack...\n");
 
@@ -330,10 +347,10 @@ The function gets the status of the kernel stack
 \ingroup module_ctrlucal
 */
 //------------------------------------------------------------------------------
-UINT16 ctrlucal_getStatus(void)
+tCtrlKernelStatus ctrlucal_getStatus(void)
 {
-    tDualprocReturn dualRet;
-    UINT16          status;
+    tDualprocReturn     dualRet;
+    tCtrlKernelStatus   status;
 
     dualRet = dualprocshm_readDataCommon(instance_l.dualProcDrvInst,
                                          offsetof(tCtrlBuf, status),

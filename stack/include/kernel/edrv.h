@@ -8,7 +8,7 @@ This file contains definitions for the Ethernet driver module.
 *******************************************************************************/
 
 /*------------------------------------------------------------------------------
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 Copyright (c) 2013, SYSTEC electronic GmbH
 All rights reserved.
 
@@ -42,8 +42,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // includes
 //------------------------------------------------------------------------------
 #include <common/oplkinc.h>
-#include <oplk/frame.h>
-#include <common/timer.h>
 
 //------------------------------------------------------------------------------
 // const defines
@@ -80,14 +78,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define CONFIG_EDRV_USE_DIAGNOSTICS             FALSE
 #endif
 
-#ifndef CONFIG_EDRV_CYCLIC_USE_DIAGNOSTICS
-#define CONFIG_EDRV_CYCLIC_USE_DIAGNOSTICS      FALSE
-#endif
-
-#ifndef EDRV_CYCLIC_SAMPLE_NUM
-#define EDRV_CYCLIC_SAMPLE_NUM                  501
-#endif
-
 #ifndef EDRV_USE_TTTX
 #define EDRV_USE_TTTX                           FALSE
 #endif
@@ -107,22 +97,20 @@ typedef enum
 {
     kEdrvReleaseRxBufferImmediately = 0x00, ///< Release the Rx buffer immediately
     kEdrvReleaseRxBufferLater       = 0x01  ///< The Rx buffer is released later
-} tEdrvReleaseRxBuffer;
+} eEdrvReleaseRxBuffer;
+
+/**
+\brief Rx buffer release data type
+
+Data type for the enumerator \ref eEdrvReleaseRxBuffer.
+*/
+typedef UINT32 tEdrvReleaseRxBuffer;
 
 /// Callback function pointer for Rx frames
 typedef tEdrvReleaseRxBuffer (*tEdrvRxHandler)(tEdrvRxBuffer* pRxBuffer_p);
 
 /// Callback function pointer for Tx frames
 typedef void (*tEdrvTxHandler)(tEdrvTxBuffer* pTxBuffer_p);
-
-/// Callback function pointer for Edrv cyclic sync
-typedef tOplkError (*tEdrvCyclicCbSync)(void);
-
-/// Callback function pointer for Edrv cyclic error
-typedef tOplkError (*tEdrvCyclicCbError)(tOplkError errorCode_p, tEdrvTxBuffer* pTxBuffer_p);
-
-/// Callback function pointer for hres timer callback function
-typedef void (*tHresCallback)(tTimerHdl* pTimerHdl_p);
 
 /**
 \brief Enumeration for Rx buffer transfer state
@@ -136,7 +124,14 @@ typedef enum
     kEdrvBufferFirstInFrame     = 0x01, ///< First data of frame received
     kEdrvBufferMiddleInFrame    = 0x02, ///< Middle data of frame received
     kEdrvBufferLastInFrame      = 0x04  ///< Last data of frame received
-} tEdrvBufferInFrame;
+} eEdrvBufferInFrame;
+
+/**
+\brief Rx buffer transfer state data type
+
+Data type for the enumerator \ref eEdrvBufferInFrame.
+*/
+typedef UINT32 tEdrvBufferInFrame;
 
 /**
 \brief Union for Tx buffer number
@@ -208,33 +203,6 @@ typedef struct
 #endif
 } tEdrvFilter;
 
-/**
-\brief Structure for cyclic Ethernet driver diagnostics
-
-This structure is used to provide diagnostics of the cyclic Ethernet driver.
-*/
-typedef struct
-{
-    // continuous min/max/avg measurement
-    ULONGLONG   cycleCount;                                 ///< Cycle counter
-    UINT32      cycleTimeMin;                               ///< Minimum measured cycle time
-    UINT32      cycleTimeMax;                               ///< Maximum measured cycle time
-    ULONGLONG   cycleTimeMeanSum;                           ///< Sum of the mean measured cycle times
-    UINT32      usedCycleTimeMin;                           ///< Minimum utilized cycle time
-    UINT32      usedCycleTimeMax;                           ///< Maximum utilized cycle time
-    ULONGLONG   usedCycleTimeMeanSum;                       ///< Sum of the mean utilized cycle times
-    UINT32      spareCycleTimeMin;                          ///< Minimum spare cycle time
-    UINT32      spareCycleTimeMax;                          ///< Maximum spare cycle time
-    ULONGLONG   spareCycleTimeMeanSum;                      ///< Sum of the mean spare cycle times
-    // sampling of runaway cycles
-    UINT        sampleNum;                                  ///< Sample number
-    UINT        sampleBufferedNum;                          ///< Buffered sample number
-    ULONGLONG   aSampleTimeStamp[EDRV_CYCLIC_SAMPLE_NUM];   ///< Array of sampled timestamps (SoC send)
-    UINT32      aCycleTime[EDRV_CYCLIC_SAMPLE_NUM];         ///< Array of cycle time values (until next SoC send)
-    UINT32      aUsedCycleTime[EDRV_CYCLIC_SAMPLE_NUM];     ///< Array of used cycle time values
-    UINT32      aSpareCycleTime[EDRV_CYCLIC_SAMPLE_NUM];    ///< Array of spare cycle time values
-} tEdrvCyclicDiagnostics;
-
 //------------------------------------------------------------------------------
 // function prototypes
 //------------------------------------------------------------------------------
@@ -244,7 +212,7 @@ extern "C"
 #endif
 
 tOplkError edrv_init(tEdrvInitParam* pEdrvInitParam_p);
-tOplkError edrv_shutdown(void);
+tOplkError edrv_exit(void);
 UINT8*     edrv_getMacAddr(void);
 tOplkError edrv_setRxMulticastMacAddr(UINT8* pMacAddr_p);
 tOplkError edrv_clearRxMulticastMacAddr(UINT8* pMacAddr_p);
@@ -256,18 +224,7 @@ tOplkError edrv_setTxBufferReady(tEdrvTxBuffer* pBuffer_p);
 tOplkError edrv_startTxBuffer(tEdrvTxBuffer* pBuffer_p);
 tOplkError edrv_releaseRxBuffer(tEdrvRxBuffer* pBuffer_p);
 tOplkError edrv_changeRxFilter(tEdrvFilter* pFilter_p, UINT count_p, UINT entryChanged_p, UINT changeFlags_p);
-int edrv_getDiagnostics(char* pBuffer_p, INT size_p);
-
-tOplkError edrvcyclic_init(void);
-tOplkError edrvcyclic_shutdown(void);
-tOplkError edrvcyclic_setCycleTime(UINT32 cycleTimeUs_p);
-tOplkError edrvcyclic_startCycle(void);
-tOplkError edrvcyclic_stopCycle(void);
-tOplkError edrvcyclic_setMaxTxBufferListSize(UINT maxListSize_p);
-tOplkError edrvcyclic_setNextTxBufferList(tEdrvTxBuffer** ppTxBuffer_p, UINT txBufferCount_p) SECTION_EDRVCYC_SET_NEXT_TX;
-tOplkError edrvcyclic_regSyncHandler(tEdrvCyclicCbSync pfnEdrvCyclicCbSync_p);
-tOplkError edrvcyclic_regErrorHandler(tEdrvCyclicCbError pfnEdrvCyclicCbError_p);
-tOplkError edrvcyclic_getDiagnostics(tEdrvCyclicDiagnostics** ppDiagnostics_p);
+int        edrv_getDiagnostics(char* pBuffer_p, INT size_p);
 
 #if EDRV_USE_TTTX == TRUE
 tOplkError edrv_getMacTime(UINT64* pCurtime_p);

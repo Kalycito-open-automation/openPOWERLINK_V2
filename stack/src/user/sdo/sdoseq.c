@@ -10,7 +10,7 @@ This file contains the implementation of the SDO Sequence Layer
 *******************************************************************************/
 
 /*------------------------------------------------------------------------------
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 Copyright (c) 2013, SYSTEC electronic GmbH
 All rights reserved.
 
@@ -110,7 +110,14 @@ typedef enum
     kSdoSeqEventFrameSend=   0x03,   ///< Frame to send
     kSdoSeqEventTimeout  =   0x04,   ///< Timeout for connection
     kSdoSeqEventCloseCon =   0x05    ///< Higher layer closed connection
-} tSdoSeqEvent;
+} eSdoSeqEvent;
+
+/**
+\brief SDO sequence layer event data type
+
+Data type for the enumerator \ref eSdoSeqEvent.
+*/
+typedef UINT32 tSdoSeqEvent;
 
 /**
 \brief  SDO sequence layer connection history
@@ -141,7 +148,14 @@ typedef enum
     kSdoSeqStateInit3       = 0x03,             ///< SDO init 3: scon=2, rcon=1
     kSdoSeqStateConnected   = 0x04,             ///< SDO connection is established
     kSdoSeqStateWaitAck     = 0x05              ///< SDO connection is waiting for an acknowledgement
-} tSdoSeqState;
+} eSdoSeqState;
+
+/**
+\brief SDO sequence layer state data type
+
+Data type for the enumerator \ref eSdoSeqState.
+*/
+typedef UINT32 tSdoSeqState;
 
 /**
 \brief  SDO sequence layer connection control structure
@@ -254,27 +268,6 @@ The function initializes the SDO sequence layer
 //------------------------------------------------------------------------------
 tOplkError sdoseq_init(tSdoComReceiveCb pfnSdoComRecvCb_p, tSdoComConCb pfnSdoComConCb_p)
 {
-    return sdoseq_addInstance(pfnSdoComRecvCb_p, pfnSdoComConCb_p);
-}
-
-//------------------------------------------------------------------------------
-/**
-\brief  Add SDO sequence layer instance
-
-The function adds an instance of the SDO sequence layer.
-
-\param  pfnSdoComRecvCb_p       Pointer to callback function that informs command
-                                layer about new frames.
-\param  pfnSdoComConCb_p        Pointer to callback function that informs command
-                                layer about connection state.
-
-\return The function returns a tOplkError error code.
-
-\ingroup module_sdo_seq
-*/
-//------------------------------------------------------------------------------
-tOplkError sdoseq_addInstance(tSdoComReceiveCb pfnSdoComRecvCb_p, tSdoComConCb pfnSdoComConCb_p)
-{
     tOplkError      ret = kErrorOk;
 
     if (pfnSdoComRecvCb_p == NULL)
@@ -309,13 +302,13 @@ tOplkError sdoseq_addInstance(tSdoComReceiveCb pfnSdoComRecvCb_p, tSdoComConCb p
 
     // init lower layers
 #if defined(CONFIG_INCLUDE_SDO_UDP)
-    ret = sdoudp_addInstance(receiveCb);
+    ret = sdoudp_init(receiveCb);
     if (ret != kErrorOk)
         return ret;
 #endif
 
 #if defined(CONFIG_INCLUDE_SDO_ASND)
-    ret = sdoasnd_addInstance(receiveCb);
+    ret = sdoasnd_init(receiveCb);
     if (ret != kErrorOk)
         return ret;
 #endif
@@ -325,16 +318,16 @@ tOplkError sdoseq_addInstance(tSdoComReceiveCb pfnSdoComRecvCb_p, tSdoComConCb p
 
 //------------------------------------------------------------------------------
 /**
-\brief  Delete SDO sequence layer instance
+\brief  Shut down SDO sequence layer
 
-The function deletes an instance of the SDO sequence layer.
+The function shuts down the SDO sequence layer.
 
 \return The function returns a tOplkError error code.
 
 \ingroup module_sdo_seq
 */
 //------------------------------------------------------------------------------
-tOplkError sdoseq_delInstance(void)
+tOplkError sdoseq_exit(void)
 {
     tOplkError          ret = kErrorOk;
     UINT                count;
@@ -360,10 +353,10 @@ tOplkError sdoseq_delInstance(void)
     OPLK_MEMSET(&sdoSeqInstance_l, 0x00, sizeof(sdoSeqInstance_l));
 
 #if defined(CONFIG_INCLUDE_SDO_UDP)
-    ret = sdoudp_delInstance();
+    ret = sdoudp_exit();
 #endif
 #if defined(CONFIG_INCLUDE_SDO_ASND)
-    ret = sdoasnd_delInstance();
+    ret = sdoasnd_exit();
 #endif
 
     return ret;
@@ -1948,4 +1941,4 @@ static tOplkError setTimer(tSdoSeqCon* pSdoSeqCon_p, ULONG timeout_p)
     return ret;
 }
 
-///\}
+/// \}

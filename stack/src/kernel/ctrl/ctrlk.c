@@ -12,7 +12,7 @@ stack. Additionally, it provides status information to the user part.
 *******************************************************************************/
 
 /*------------------------------------------------------------------------------
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -46,6 +46,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <kernel/ctrlkcal.h>
 #include <kernel/dllk.h>
 #include <kernel/dllkcal.h>
+#include <kernel/edrv.h>
 #include <kernel/eventk.h>
 #include <kernel/eventkcal.h>
 #include <kernel/errhndk.h>
@@ -53,6 +54,18 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <kernel/pdok.h>
 
 #include "../dll/dllkframe.h"
+
+#if CONFIG_TIMER_USE_HIGHRES != FALSE
+#include <kernel/hrestimer.h>
+#endif
+
+#if (CONFIG_DLL_PROCESS_SYNC == DLL_PROCESS_SYNC_ON_TIMER)
+#include <kernel/synctimer.h>
+#endif
+
+#if defined(CONFIG_INCLUDE_NMT_MN)
+#include <kernel/edrvcyclic.h>
+#endif
 
 #if defined(CONFIG_INCLUDE_VETH)
 #include <kernel/veth.h>
@@ -177,7 +190,7 @@ BOOL ctrlk_process(void)
 {
     tOplkError          ret = kErrorOk;
     UINT16              fRet;
-    UINT16              status;
+    tCtrlKernelStatus   status;
     tCtrlCmdType        cmd = kCtrlNone;
     BOOL                fExit = FALSE;
 
@@ -228,11 +241,11 @@ pointer to the status and exit flag is not NULL the appropriate data is stored.
 \ingroup module_ctrlk
 */
 //------------------------------------------------------------------------------
-tOplkError ctrlk_executeCmd(tCtrlCmdType cmd_p, UINT16* pRet_p, UINT16* pStatus_p,
-                            BOOL* pfExit_p)
+tOplkError ctrlk_executeCmd(tCtrlCmdType cmd_p, UINT16* pRet_p,
+                            tCtrlKernelStatus* pStatus_p, BOOL* pfExit_p)
 {
     tOplkError          ret = kErrorOk;
-    UINT16              status;
+    tCtrlKernelStatus   status;
     BOOL                fExit;
     tOplkError          retVal;
 
@@ -370,7 +383,18 @@ static tOplkError initStack(void)
     if ((ret = nmtk_init()) != kErrorOk)
         return ret;
 
-    ret = dllk_addInstance();
+    //jba able to work without hresk?
+#if CONFIG_TIMER_USE_HIGHRES != FALSE
+    if ((ret = hrestimer_init()) != kErrorOk)
+        return ret;
+#endif
+
+#if (CONFIG_DLL_PROCESS_SYNC == DLL_PROCESS_SYNC_ON_TIMER)
+    if ((ret = synctimer_init()) != kErrorOk)
+        return ret;
+#endif
+
+    ret = dllk_init();
     if (ret != kErrorOk)
         return ret;
 
@@ -409,7 +433,7 @@ static tOplkError initStack(void)
 
     // initialize Virtual Ethernet Driver
 #if defined(CONFIG_INCLUDE_VETH)
-    if ((ret = veth_addInstance(instance_l.initParam.aMacAddress)) != kErrorOk)
+    if ((ret = veth_init(instance_l.initParam.aMacAddress)) != kErrorOk)
         return ret;
 #endif
 
@@ -431,16 +455,24 @@ static tOplkError shutdownStack(void)
 {
 
 #if defined(CONFIG_INCLUDE_VETH)
-    veth_delInstance();
+    veth_exit();
 #endif
 
 #if defined(CONFIG_INCLUDE_PDO)
     pdok_exit();
 #endif
 
-    nmtk_delInstance();
+    nmtk_exit();
 
-    dllk_delInstance();
+    dllk_exit();
+
+#if CONFIG_TIMER_USE_HIGHRES != FALSE
+    hrestimer_exit();
+#endif
+
+#if (CONFIG_DLL_PROCESS_SYNC == DLL_PROCESS_SYNC_ON_TIMER)
+    synctimer_exit();
+#endif
 
     dllkcal_exit();
 
@@ -448,10 +480,10 @@ static tOplkError shutdownStack(void)
 
 #if defined (CONFIG_INCLUDE_NMT_MN)
     // DLL and events are shutdown, now it's save to shutdown edrvcyclic
-    edrvcyclic_shutdown();
+    edrvcyclic_exit();
 #endif
 
-    edrv_shutdown();
+    edrv_exit();
 
     errhndk_exit();
 
@@ -491,6 +523,11 @@ void setupKernelFeatures(void)
     // We contain the virtual Ethernet module and therefore need a kernel
     // which supports virtual Ethernet.
     instance_l.features |= OPLK_KERNEL_VETH;
+#endif
+
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+    // We contain the code of the redundancy MN (RMN).
+    instance_l.features |= OPLK_KERNEL_RMN;
 #endif
 
 #if (CONFIG_DLL_PRES_CHAINING_CN == TRUE)

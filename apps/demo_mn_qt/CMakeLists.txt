@@ -45,12 +45,17 @@ SET(OBJDICT CiA302-4_MN)            # Set object dictionary to use
 FIND_OPLK_LIBRARY("mn")             # Find suitable openPOWERLINK library
 FIND_PACKAGE(Qt4 REQUIRED)          # Find Qt4
 
+SET(CFG_DEMO_PROJECT "Demo_3CN" CACHE STRING
+        "Valid projects are Demo_3CN, Demo_RMN_3CN")
+SET_PROPERTY(CACHE CFG_DEMO_PROJECT PROPERTY STRINGS Demo_3CN Demo_RMN_3CN)
+
 SET(CFG_CFM ON CACHE BOOL "Use Configuration Manager (CFM)")
 
 # Set generic sources and include directories for this demo
 SET (DEMO_SOURCES
      ${DEMO_SOURCE_DIR}/main.cpp
      ${DEMO_SOURCE_DIR}/MainWindow.cpp
+     ${DEMO_SOURCE_DIR}/SdoDialog.cpp
      ${DEMO_SOURCE_DIR}/Api.cpp
      ${DEMO_SOURCE_DIR}/CnState.cpp
      ${DEMO_SOURCE_DIR}/DataInOutThread.cpp
@@ -60,6 +65,7 @@ SET (DEMO_SOURCES
      ${DEMO_SOURCE_DIR}/State.cpp
      ${DEMO_SOURCE_DIR}/Leds.cpp
      ${DEMO_SOURCE_DIR}/NodeState.cpp
+     ${DEMO_SOURCE_DIR}/NmtCommandDialog.cpp
      ${CONTRIB_SOURCE_DIR}/console/printlog.c
      )
 
@@ -75,7 +81,9 @@ SET (DEMO_HEADERS
      ${DEMO_INCLUDE_DIR}/State.h
      ${DEMO_INCLUDE_DIR}/Leds.h
      ${DEMO_INCLUDE_DIR}/MainWindow.h
+     ${DEMO_INCLUDE_DIR}/SdoDialog.h
      ${DEMO_INCLUDE_DIR}/NodeState.h
+     ${DEMO_INCLUDE_DIR}/NmtCommandDialog.h
      )
 
 INCLUDE_DIRECTORIES(
@@ -145,15 +153,15 @@ SET_PROPERTY(TARGET demo_mn_qt
              PROPERTY COMPILE_DEFINITIONS_DEBUG DEBUG;DEF_DEBUG_LVL=${CFG_DEBUG_LVL})
 
 ADD_CUSTOM_COMMAND(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/mnobd.cdc
-                   COMMAND ${CMAKE_COMMAND} -E copy ${OPENCONFIG_PROJ_DIR}/Demo_3CN/output/mnobd.cdc ${CMAKE_CURRENT_BINARY_DIR}/mnobd.cdc
-                   DEPENDS ${OPENCONFIG_PROJ_DIR}/Demo_3CN/output/mnobd.cdc
+                   COMMAND ${CMAKE_COMMAND} -E copy ${OPENCONFIG_PROJ_DIR}/${CFG_DEMO_PROJECT}/output/mnobd.cdc ${CMAKE_CURRENT_BINARY_DIR}/mnobd.cdc
+                   DEPENDS ${OPENCONFIG_PROJ_DIR}/${CFG_DEMO_PROJECT}/output/mnobd.cdc
                    VERBATIM
                    )
 
 ################################################################################
 # Libraries to link
 
-TARGET_LINK_LIBRARIES(demo_mn_qt optimized ${OPLKLIB} debug ${OPLKLIB_DEBUG})
+OPLK_LINK_LIBRARIES(demo_mn_qt)
 TARGET_LINK_LIBRARIES(demo_mn_qt ${ARCH_LIBRARIES} ${QT_LIBRARIES})
 
 ################################################################################

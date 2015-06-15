@@ -48,6 +48,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "Input.h"
 #include "CnState.h"
 #include "Output.h"
+#include "SdoDialog.h"
 
 //------------------------------------------------------------------------------
 // class definitions
@@ -82,7 +83,9 @@ private slots:
     void         toggleWindowState();
     void         startPowerlink();
     void         stopPowerlink();
+    void         showSdoDialog();
     void         printlog(QString str);
+    void         execNmtCmd();
 
 private:
     QHBoxLayout* pHeadRegion;
@@ -97,7 +100,9 @@ private:
     QLineEdit*   pNodeIdEdit;
 
     QPushButton* pToggleMax;
+    QPushButton* pShowSdoDialog;
     QPushButton* pStartStopOplk;
+    QPushButton* pNmtCmd;
 
     QFrame*      pFrameSepHeadMiddle;
     QFrame*      pFrameSepMiddle;
@@ -108,6 +113,13 @@ private:
     QTextEdit*   pTextEdit;
 
     Api*         pApi;
+    SdoDialog*   pSdoDialog;
+
+    UINT32       version;
+
+    QString      devName;
+
+    tNmtEvent    nmtEvent;
 };
 
 #endif /* _INC_MainWindow_H_ */

@@ -2,7 +2,7 @@
 #
 # File lists for openPOWERLINK stack sources
 #
-# Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+# Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 # Copyright (c) 2014, Kalycito Infotech Private Limited
 # All rights reserved.
 #
@@ -241,6 +241,7 @@ SET(KERNEL_SOURCES
     ${KERNEL_SOURCE_DIR}/pdo/pdok.c
     ${KERNEL_SOURCE_DIR}/pdo/pdokcal.c
     ${KERNEL_SOURCE_DIR}/pdo/pdokcal-triplebufshm.c
+    ${KERNEL_SOURCE_DIR}/pdo/pdoklut.c
     ${KERNEL_SOURCE_DIR}/errhnd/errhndk.c
     ${KERNEL_SOURCE_DIR}/ctrl/ctrlk.c
     )
@@ -462,6 +463,10 @@ SET(MEMMAP_NULL_SOURCES
     ${COMMON_SOURCE_DIR}/memmap/memmap-null.c
     )
 
+SET(MEMMAP_DUALPROCSHM_SOURCES
+    ${COMMON_SOURCE_DIR}/memmap/memmap-noosdual.c
+    )
+
 ################################################################################
 # Target system specific sources
 ################################################################################
@@ -502,6 +507,16 @@ SET(TARGET_XILINX_ARM_SOURCES
 
 SET(TARGET_XILINX_ARM_DUAL_SOURCES
     ${ARCH_SOURCE_DIR}/xilinx-zynqarm/lock-dualprocnoos.c
+    )
+
+SET(TARGET_ALTERA_ARM_SOURCES
+    ${ARCH_SOURCE_DIR}/altera-c5socarm/target-c5socarm.c
+    ${ARCH_SOURCE_DIR}/altera-c5socarm/target-mutex.c
+    ${ARCH_SOURCE_DIR}/altera-c5socarm/sleep.c
+    )
+
+SET(TARGET_ALTERA_ARM_DUAL_SOURCES
+    ${ARCH_SOURCE_DIR}/altera-c5socarm/lock-dualprocnoos.c
     )
 ################################################################################
 # Architecture specific sources
@@ -613,8 +628,10 @@ SET(KERNEL_HEADERS
     ${STACK_INCLUDE_DIR}/kernel/nmtk.h
     ${STACK_INCLUDE_DIR}/kernel/pdok.h
     ${STACK_INCLUDE_DIR}/kernel/pdokcal.h
+    ${STACK_INCLUDE_DIR}/kernel/pdoklut.h
     ${STACK_INCLUDE_DIR}/kernel/veth.h
     ${STACK_INCLUDE_DIR}/kernel/edrv.h
+    ${STACK_INCLUDE_DIR}/kernel/edrvcyclic.h
     )
 
 SET(OBJDICT_HEADERS

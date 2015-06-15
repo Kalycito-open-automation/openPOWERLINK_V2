@@ -7,6 +7,7 @@
     <tab type="usergroup" title="openPOWERLINK Stack" url="\ref page_openpowerlink">
       <tab type="user" url="\ref page_directories" title="Directory Structure"/>
       <tab type="user" url="\ref page_components" title="Components"/>
+      <tab type="user" url="\ref page_mnredundancy" title="Managing Node Redundancy"/>
       <tab type="usergroup" title="Building">
         <tab type="user" url="\ref page_build" title="Building openPOWERLINK"/>
         <tab type="user" url="\ref page_build_stack" title="Building Stack Libraries"/>
@@ -20,6 +21,7 @@
           <tab type="user" url="\ref page_platform_zynq" title="Xilinx Zynq"/>
           <tab type="user" url="\ref page_platform_altera-mn" title="Altera Nios II (MN)"/>
           <tab type="user" url="\ref page_platform_altera-cn" title="Altera Nios II (CN)"/>
+          <tab type="user" url="\ref page_platform_altera-soc" title="Altera Cyclone V SoC"/>
       </tab>
       <tab type="usergroup" title="Supported Operating Systems" url="\ref page_platforms">
           <tab type="user" url="\ref page_platform_linux" title="Linux"/>

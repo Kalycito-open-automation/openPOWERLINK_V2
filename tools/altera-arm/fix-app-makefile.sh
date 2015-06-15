@@ -1,8 +1,9 @@
+#!/bin/bash
 ################################################################################
 #
-# Application creation settings file for Altera Nios II
+# Build openPOWERLINK APP for Altera Cyclone V ARM
 #
-# Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+# Copyright (c) 2015, Kalycito Infotech Private Limited
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
@@ -27,26 +28,12 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ################################################################################
+# $ ./fix-app-makefile [MAKEFILE]
+# Fix APP Makefile for Cyclone V ARM
 
-APP_NAME=demo_cn_embedded
+MAKE_FILE=$1
 
-# Library sources
-APP_SOURCES="\
-${OPLK_BASE_DIR}/apps/common/src/lcd/lcd.c \
-${OPLK_BASE_DIR}/apps/common/src/lcd/lcdl-16207.c \
-${OPLK_BASE_DIR}/apps/common/src/gpio/gpio-nios2.c \
-${OPLK_BASE_DIR}/apps/common/src/arp/arp.c \
-${OPLK_BASE_DIR}/apps/demo_cn_embedded/src/app.c \
-${OPLK_BASE_DIR}/apps/demo_cn_embedded/src/event.c \
-${OPLK_BASE_DIR}/apps/demo_cn_embedded/src/main.c \
-"
-
-APP_INCLUDES="\
-${OPLK_BASE_DIR}/apps/common/src/gpio \
-${OPLK_BASE_DIR}/apps/common/src/lcd \
-${OPLK_BASE_DIR}/apps/common/src/arp \
-${OPLK_BASE_DIR}/stack/include \
-${OPLK_BASE_DIR}/stack/proj/generic/liboplkcn \
-"
-
-APP_OPT_LEVEL=-O2
+# Fix linker path issue
+# On second thought update all gcc invocations path to cygwin path
+chmod u+rw ${MAKE_FILE}
+sed -i 's/^	.*arm-altera-eabi-gcc.exe/	arm-altera-eabi-gcc.exe/g' ${MAKE_FILE}

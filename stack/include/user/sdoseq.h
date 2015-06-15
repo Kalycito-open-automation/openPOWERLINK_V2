@@ -8,7 +8,7 @@ The file contains definitions for the SDO sequence layer module.
 *******************************************************************************/
 
 /*------------------------------------------------------------------------------
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 Copyright (c) 2013, SYSTEC electronic GmbH
 All rights reserved.
 
@@ -72,7 +72,14 @@ typedef enum
     kAsySdoConStateFrameSent            = 0x04,     ///< A frame has been sent
     kAsySdoConStateTimeout              = 0x05,     ///< A timeout has occured
     kAsySdoConStateTransferAbort        = 0x06,     ///< The SDO transfer has been aborted
-} tAsySdoConState;
+} eAsySdoConState;
+
+/**
+\brief SDO connection state data type
+
+Data type for the enumerator \ref eAsySdoConState.
+*/
+typedef UINT32 tAsySdoConState;
 
 /// Data type for handle between asynchronous SDO Sequence Layer and SDO Command Layer
 typedef UINT tSdoSeqConHdl;
@@ -93,8 +100,7 @@ extern "C"
 #endif
 
 tOplkError sdoseq_init(tSdoComReceiveCb pfnSdoComRecvCb_p, tSdoComConCb pfnSdoComConCb_p);
-tOplkError sdoseq_addInstance(tSdoComReceiveCb pfnSdoComRecvCb_p, tSdoComConCb pfnSdoComConCb_p);
-tOplkError sdoseq_delInstance(void);
+tOplkError sdoseq_exit(void);
 tOplkError sdoseq_initCon(tSdoSeqConHdl* pSdoSeqConHdl_p, UINT nodeId_p, tSdoType sdoType_p);
 tOplkError sdoseq_sendData(tSdoSeqConHdl sdoSeqConHdl_p, UINT dataSize_p, tPlkFrame* pData_p);
 tOplkError sdoseq_processEvent(tEvent* pEvent_p);

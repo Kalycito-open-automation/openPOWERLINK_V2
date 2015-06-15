@@ -123,11 +123,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 #if (TARGET_SYSTEM == _NO_OS_ && DEV_SYSTEM == _DEV_NIOS2_)
-#define O_BINARY 0 //FIXME: If file system is used, you have to fix that!
+#define OBDCDC_DISABLE_FILE_SUPPORT     TRUE
+#endif
+
+#if ((TARGET_SYSTEM == _NO_OS_) && (DEV_SYSTEM == _DEV_ARM_ALTERA_EABI_))
+#define OBDCDC_DISABLE_FILE_SUPPORT     TRUE
 #endif
 
 #if (TARGET_SYSTEM == _NO_OS_ && (DEV_SYSTEM == _DEV_MICROBLAZE_LITTLE_ || DEV_SYSTEM == _DEV_MICROBLAZE_BIG_))
-#define O_BINARY    0 // FIXME: If file system is used, you have to fix that!
+#define OBDCDC_DISABLE_FILE_SUPPORT     TRUE
 #endif
 
 #ifndef FD_TYPE
@@ -138,6 +142,10 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define IS_FD_VALID(iFd_p)  ((iFd_p) >= 0)
 #endif
 
+#ifndef OBDCDC_DISABLE_FILE_SUPPORT
+#define OBDCDC_DISABLE_FILE_SUPPORT     FALSE
+#endif
+
 //------------------------------------------------------------------------------
 // local types
 //------------------------------------------------------------------------------
@@ -145,7 +153,14 @@ typedef enum
 {
     kObdCdcTypeFile      = 0,
     kObdCdcTypeBuffer    = 1,
-} tObdCdcType;
+} eObdCdcType;
+
+/**
+\brief OBD CDC type data type
+
+Data type for the enumerator \ref eObdCdcType.
+*/
+typedef UINT32 tObdCdcType;
 
 typedef struct
 {
@@ -311,6 +326,7 @@ file and writes its contents into the OD.
 static tOplkError loadCdcFile(char* pCdcFilename_p)
 {
     tOplkError      ret = kErrorOk;
+#if OBDCDC_DISABLE_FILE_SUPPORT == FALSE
     tObdCdcInfo     cdcInfo;
     UINT32          error;
 
@@ -337,7 +353,10 @@ static tOplkError loadCdcFile(char* pCdcFilename_p)
     }
 
     close(cdcInfo.handle.fdCdcFile);
-
+#else
+    UNUSED_PARAMETER(pCdcFilename_p);
+    ret = kErrorNoResource;
+#endif
     return ret;
 }
 
@@ -461,11 +480,14 @@ The function loads the next buffer from the CDC
 static tOplkError loadNextBuffer(tObdCdcInfo* pCdcInfo_p, size_t bufferSize)
 {
     tOplkError  ret = kErrorOk;
+#if OBDCDC_DISABLE_FILE_SUPPORT == FALSE
     int         readSize;
     UINT8*      pBuffer;
+#endif
 
     switch (pCdcInfo_p->type)
     {
+#if OBDCDC_DISABLE_FILE_SUPPORT == FALSE
         case kObdCdcTypeFile:
             if (pCdcInfo_p->bufferSize < bufferSize)
             {
@@ -503,7 +525,7 @@ static tOplkError loadNextBuffer(tObdCdcInfo* pCdcInfo_p, size_t bufferSize)
             }
             while (bufferSize > 0);
             break;
-
+#endif
         case kObdCdcTypeBuffer:
             if (pCdcInfo_p->bufferSize < bufferSize)
             {

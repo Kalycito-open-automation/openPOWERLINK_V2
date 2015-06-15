@@ -10,7 +10,7 @@ This file contains the standard command layer implementation.
 *******************************************************************************/
 
 /*------------------------------------------------------------------------------
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 Copyright (c) 2013, SYSTEC electronic GmbH
 All rights reserved.
 
@@ -94,7 +94,14 @@ typedef enum
     kSdoTransAuto                       = 0x00,     ///< Automatically select the transfer type
     kSdoTransExpedited                  = 0x01,     ///< SDO expedited transfer
     kSdoTransSegmented                  = 0x02      ///< SDO segmented transfer
-} tSdoTransType;
+} eSdoTransType;
+
+/**
+\brief SDO transfer data type
+
+Data type for the enumerator \ref eSdoTransType.
+*/
+typedef UINT32 tSdoTransType;
 
 /**
 \brief Enumeration for SDO service types (command IDs)
@@ -118,7 +125,14 @@ typedef enum
     kSdoServiceReadMultiByIndex         = 0x32,     ///< SDO Read of multiple objects/sub-objects
     kSdoServiceMaxSegSize               = 0x70      ///< SDO maximum segment size
     // 0x80 - 0xFF manufacturer specific
-} tSdoServiceType;
+} eSdoServiceType;
+
+/**
+\brief SDO service type data type
+
+Data type for the enumerator \ref eSdoServiceType.
+*/
+typedef UINT32 tSdoServiceType;
 
 /**
 \brief  SDO command layer events
@@ -141,7 +155,14 @@ typedef enum
     kSdoComConEventInitCon          = 0x09, ///< Init connection (only client)
     kSdoComConEventAbort            = 0x0A, ///< Abort SDO transfer (only client)
 #endif
-} tSdoComConEvent;
+} eSdoComConEvent;
+
+/**
+\brief SDO command layer event data type
+
+Data type for the enumerator \ref eSdoComConEvent.
+*/
+typedef UINT32 tSdoComConEvent;
 
 /**
 \brief  SDO command layer message types
@@ -154,7 +175,14 @@ typedef enum
     kSdoComSendTypeAckRes           = 0x01,  ///< Send a response without data
     kSdoComSendTypeRes              = 0x02,  ///< Send response with data
     kSdoComSendTypeAbort            = 0x03   ///< Send abort
-} tSdoComSendType;
+} eSdoComSendType;
+
+/**
+\brief SDO command layer message data type
+
+Data type for the enumerator \ref eSdoComSendType.
+*/
+typedef UINT32 tSdoComSendType;
 
 /**
 \brief  SDO command layer states
@@ -173,7 +201,14 @@ typedef enum
     kSdoComStateClientConnected     = 0x11, ///< Server: Connection established
     kSdoComStateClientSegmTrans     = 0x12  ///< Server: Send following frames
 #endif
-} tSdoComState;
+} eSdoComState;
+
+/**
+\brief SDO command layer state data type
+
+Data type for the enumerator \ref eSdoComState.
+*/
+typedef UINT32 tSdoComState;
 
 /**
 \brief  SDO command layer connection control structure
@@ -219,8 +254,7 @@ typedef struct
 // local function prototypes
 //------------------------------------------------------------------------------
 static tOplkError sdoInit(void);
-static tOplkError sdoAddInstance(void);
-static tOplkError sdoDelInstance(void);
+static tOplkError sdoExit(void);
 static tOplkError sdoDefineConnection(tSdoComConHdl* pSdoComConHdl_p, UINT targetNodeId_p,
                                           tSdoType protType_p);
 static tOplkError sdoInitTransferByIndex(tSdoComTransParamByIndex* pSdoComTransParam_p);
@@ -273,8 +307,7 @@ the standard implementation.
 static tSdoComFunctions standardSdoFunctions =
 {
    sdoInit,
-   sdoAddInstance,
-   sdoDelInstance,
+   sdoExit,
 #if defined(CONFIG_INCLUDE_SDOC)
    sdoDefineConnection,
    sdoInitTransferByIndex,
@@ -322,25 +355,11 @@ The function initializes the command layer module.
 //------------------------------------------------------------------------------
 static tOplkError sdoInit(void)
 {
-    return sdoAddInstance();
-}
-
-//------------------------------------------------------------------------------
-/**
-\brief  Add an instance of the SDO command layer module
-
-The function adds an instance of the command layer module.
-
-\return The function returns a tOplkError error code.
-*/
-//------------------------------------------------------------------------------
-static tOplkError sdoAddInstance(void)
-{
     tOplkError ret = kErrorOk;
 
     OPLK_MEMSET(&sdoComInstance_l, 0x00, sizeof(sdoComInstance_l));
 
-    ret = sdoseq_addInstance(receiveCb, conStateChangeCb);
+    ret = sdoseq_init(receiveCb, conStateChangeCb);
     if (ret != kErrorOk)
         return ret;
 
@@ -353,21 +372,21 @@ static tOplkError sdoAddInstance(void)
 
 //------------------------------------------------------------------------------
 /**
-\brief  Delete an instance of the SDO command layer module
+\brief  Shut down the SDO command layer
 
-The function deletes an instance of the command layer module.
+The function shuts down the SDO command layer module.
 
 \return The function returns a tOplkError error code.
 */
 //------------------------------------------------------------------------------
-static tOplkError sdoDelInstance(void)
+static tOplkError sdoExit(void)
 {
     tOplkError  ret = kErrorOk;
 
 #if defined(WIN32) || defined(_WIN32)
     DeleteCriticalSection(sdoComInstance_l.pCriticalSection);
 #endif
-    ret = sdoseq_delInstance();
+    ret = sdoseq_exit();
     return ret;
 }
 
@@ -1779,7 +1798,6 @@ static tOplkError serverInitWriteByIndex(tSdoComCon* pSdoComCon_p, tAsySdoCom* p
     UINT            index;
     UINT            subindex;
     UINT            bytesToTransfer;
-    tObdSize        entrySize;
     tObdAccess      accessType;
     UINT8*          pSrcData;
 
@@ -1902,18 +1920,36 @@ static tOplkError serverInitWriteByIndex(tSdoComCon* pSdoComCon_p, tAsySdoCom* p
     }
     else
     {
-        // get size of the object to check if it fits
-        // because we directly write to the destination memory
-        // d.k. no one calls the user OD callback function
+        // Imitate some user OD callback handling.
+        // This includes checking of OD entry size
+        ret = obd_initWrite(index, subindex, (void*)&pSdoComCon_p->pData, pSdoComCon_p->transferSize);
+        switch (ret)
+        {
+            case kErrorOk:
+                break;
 
-        entrySize = obd_getDataSize(index, subindex);
-        if (entrySize < pSdoComCon_p->transferSize)
-        {   // parameter too big
-            pSdoComCon_p->lastAbortCode = SDO_AC_DATA_TYPE_LENGTH_TOO_HIGH;
+            case kErrorObdAccessViolation:
+                pSdoComCon_p->lastAbortCode = SDO_AC_UNSUPPORTED_ACCESS;
+                // send abort
+                goto Abort;
+                break;
+
+            case kErrorObdValueLengthError:
+                pSdoComCon_p->lastAbortCode = SDO_AC_DATA_TYPE_LENGTH_NOT_MATCH;
+                // send abort
+                goto Abort;
+                break;
+
+            default:
+                pSdoComCon_p->lastAbortCode = SDO_AC_GENERAL_ERROR;
+                // send abort
+                goto Abort;
+                break;
+        }
+        if (pSdoComCon_p->pData == NULL)
+        {
+            pSdoComCon_p->lastAbortCode = SDO_AC_GENERAL_ERROR;
             // send abort
-            // d.k. This is wrong: k.t. not needed send abort on end of write
-            /*pSdoComCon_p->pData = (UINT8*)&abortCode;
-            ret = serverSendFrame(pSdoComCon_p, index, subindex, kSdoComSendTypeAbort);*/
             goto Abort;
         }
 
@@ -2397,4 +2433,4 @@ static tOplkError transferFinished(tSdoComConHdl sdoComConHdl_p, tSdoComCon* pSd
     return ret;
 }
 
-///\}
+/// \}

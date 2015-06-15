@@ -94,17 +94,17 @@ SET(DEMO_ARCH_SOURCES
     ${DEMO_ARCHSOURCES}
     ${COMMON_SOURCE_DIR}/gpio/gpio-microblaze.c
     ${COMMON_SOURCE_DIR}/lcd/lcdl-null.c
+    ${COMMON_SOURCE_DIR}/system/system-microblaze.c
    )
 
 INCLUDE_DIRECTORIES(
                     ${XIL_BSP_DIR}/include
                     ${OPLK_ROOT_DIR}/stack/src/arch/xilinx_microblaze
-                    ${COMMON_SOURCE_DIR}/gpio
                    )
 
 ################################################################################
 # Set architecture specific definitions
-ADD_DEFINITIONS(${XIL_HOST_CFLAGS} "-fmessage-length=0 -mcpu=${CFG_HOST_CPU_VERSION} -ffunction-sections -fdata-sections")
+SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${XIL_HOST_CFLAGS} -fmessage-length=0 -mcpu=${CFG_HOST_CPU_VERSION} -ffunction-sections -fdata-sections")
 
 ################################################################################
 # Set architecture specific linker flags

@@ -13,7 +13,7 @@ application.
 /*------------------------------------------------------------------------------
 Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 Copyright (c) 2013, SYSTEC electronic GmbH
-Copyright (c) 2013, Kalycito Infotech Private Ltd.All rights reserved.
+Copyright (c) 2015, Kalycito Infotech Private Ltd.All rights reserved.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -45,15 +45,16 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <oplk/oplk.h>
 #include <oplk/debugstr.h>
 
-#include <gpio.h>
-#include <lcd.h>
-#include <arp.h>
+#include <gpio/gpio.h>
+#include <lcd/lcd.h>
+#include <arp/arp.h>
+#include <system/system.h>
 
 #include "app.h"
 #include "event.h"
 
 #if (CONFIG_CDC_ON_SD != FALSE)
-#include <sdcard.h>
+#include <sdcard/sdcard.h>
 #endif
 
 //============================================================================//
@@ -143,11 +144,14 @@ int main(void)
     tOplkError      ret = kErrorOk;
     const UINT8     aMacAddr[] = {MAC_ADDR};
     UINT8           nodeid;
+    UINT32          version;
+
 #if (CONFIG_CDC_ON_SD != FALSE)
     tCdcBuffInfo    cdcBuffInfo;
 #endif
 
     // Initialize helper modules
+    system_init();
     gpio_init();
     lcd_init();
 
@@ -179,9 +183,10 @@ int main(void)
     initEvents(&instance_l.fGsOff, &eventCbPowerlink);
     arp_init((UINT8)instance_l.nodeId);
 
+    version = oplk_getVersion();
     PRINTF("----------------------------------------------------\n");
-    PRINTF("openPOWERLINK console MN DEMO application\n");
-    PRINTF("using openPOWERLINK Stack: %s\n", PLK_DEFINED_STRING_VERSION);
+    PRINTF("openPOWERLINK embedded MN DEMO application\n");
+    PRINTF("using openPOWERLINK Stack: %x.%x.%x\n", PLK_STACK_VER(version), PLK_STACK_REF(version), PLK_STACK_REL(version));
     PRINTF("----------------------------------------------------\n");
 
     PRINTF("NODEID=0x%02X\n", instance_l.nodeId);
@@ -209,6 +214,7 @@ Exit:
     // Shutdown helper modules
     lcd_exit();
     gpio_exit();
+    system_exit();
 
     return 0;
 }

@@ -10,7 +10,7 @@ This file contains the definitions for the high-resolution timer module.
 
 /*------------------------------------------------------------------------------
 Copyright (c) 2013, SYSTEC electronic GmbH
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -63,6 +63,9 @@ This type defines a function pointer to a timer callback function.
 */
 typedef tOplkError (*tTimerkCallback)(tTimerEventArg* pEventArg_p);
 
+/// Callback function pointer for hres timer callback function
+typedef void (*tHresCallback)(tTimerHdl* pTimerHdl_p);
+
 //------------------------------------------------------------------------------
 // function prototypes
 //------------------------------------------------------------------------------
@@ -73,8 +76,7 @@ extern "C"
 #endif
 
 tOplkError hrestimer_init(void);
-tOplkError hrestimer_addInstance(void);
-tOplkError hrestimer_delInstance(void);
+tOplkError hrestimer_exit(void);
 tOplkError hrestimer_modifyTimer(tTimerHdl* pTimerHdl_p, ULONGLONG time_p,
                                  tTimerkCallback pfnCallback_p, ULONG argument_p,
                                  BOOL fContinue_p) SECTION_HRTIMER_MODTIMER;

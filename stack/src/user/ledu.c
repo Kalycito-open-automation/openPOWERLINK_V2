@@ -11,7 +11,7 @@ This file contains the implementation of the user LED module.
 
 /*------------------------------------------------------------------------------
 Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
-Copyright (c) 2013, SYSTEC electronic GmbH
+Copyright (c) 2015, SYSTEC electronic GmbH
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -92,7 +92,14 @@ typedef enum
     kLeduModeSingleFlash    = 0x05,
     kLeduModeDoubleFlash    = 0x06,
     kLeduModeTripleFlash    = 0x07,
-} tLeduMode;
+} eLeduMode;
+
+/**
+\brief LED mode data type
+
+Data type for the enumerator \ref eLeduMode.
+*/
+typedef UINT32 tLeduMode;
 
 /**
  * \brief   User LED module instance
@@ -201,6 +208,8 @@ tOplkError ledu_cbNmtStateChange(tEventNmtStateChange nmtStateChange_p)
         case kNmtGsResetConfiguration:
         case kNmtCsNotActive:
         case kNmtMsNotActive:
+        case kNmtRmsNotActive:
+
             if (leduInstance_g.statusLedMode != kLeduModeOff)
             {   // state changed
                 leduInstance_g.statusLedMode = kLeduModeOff;

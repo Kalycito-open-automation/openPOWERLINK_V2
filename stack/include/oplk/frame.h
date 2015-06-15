@@ -9,7 +9,7 @@ This header file contains definitions describing POWERLINK frames.
 
 /*------------------------------------------------------------------------------
 Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
-Copyright (c) 2013, SYSTEC electronic GmbH
+Copyright (c) 2015, SYSTEC electronic GmbH
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -58,6 +58,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define PLK_FRAME_FLAG2_RS          0x07    // number of pending requests to send       (PRes, StatusRes, IdentRes)
 #define PLK_FRAME_FLAG2_PR          0x38    // priority of requested asynch. frame      (PRes, StatusRes, IdentRes)
 #define PLK_FRAME_FLAG2_PR_SHIFT    3       // shift of priority of requested asynch. frame
+#define PLK_FRAME_FLAG3_MR          0x01    // MN redundancy active                     (SoA)
 
 // error history/status entry types
 #define ERR_ENTRYTYPE_STATUS        0x8000
@@ -111,9 +112,38 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define SDO_CMDL_FLAG_SEGMCOMPL      0x30
 #define SDO_CMDL_FLAG_SEGM_MASK      0x30
 
+// defines for NMT command data of NMTGoToStandby
+#define NMT_CMD_DATA_FLAG_DELAY             0x01    // include MNSwitchOverDelay_U32
+
 //------------------------------------------------------------------------------
 // typedef
 //------------------------------------------------------------------------------
+
+/**
+* \brief Message type
+*
+* This enumeration defines the POWERLINK message type IDs.
+*
+* For more information consult the POWERLINK specification document "EPSG DS 301 V1.2.0" on page 349.
+*/
+typedef enum
+{
+    kMsgTypeNonPowerlink        = 0x00,                     ///< Defines non POWERLINK Frame
+    kMsgTypeSoc                 = 0x01,                     ///< Defines Start of Cycle Frame
+    kMsgTypePreq                = 0x03,                     ///< Defines Poll Request Frame
+    kMsgTypePres                = 0x04,                     ///< Defines Poll Response Frame
+    kMsgTypeSoa                 = 0x05,                     ///< Defines Start of Asynchronous Cycle Frame
+    kMsgTypeAsnd                = 0x06,                     ///< Defines Asynchronous Send Frame
+    kMsgTypeAmni                = 0x07,                     ///< Defines Active Managing Node Indication Frame
+    kMsgTypeAInv                = 0x0D,                     ///< Defines Asynchronous Invite Frame
+} eMsgType;
+
+/**
+\brief Message type data type
+
+Data type for the enumerator \ref eMsgType.
+*/
+typedef UINT8 tMsgType;
 
 // byte-align structures
 #ifdef _MSC_VER
@@ -188,8 +218,7 @@ typedef struct
 */
 typedef struct
 {
-    UINT8                   reserved;                       ///< Reserved (Offset 23)
-    UINT32                  syncControlLe;                  ///< Sync Control
+    UINT32                  syncControlLe;                  ///< Sync Control (Offset 24)
                                                             //*< Contains the flags PResTimeFirstValid, PResTimeSecondValid, SyncMNDelayFirstValid, SyncMNDelaySecondValid, PResFallBackTimeoutValid, DestMacAddressValid, PResModeReset and PResModeSet.*/
     UINT32                  presTimeFirstLe;                ///< Contains the PRes Response Time [ns] starting from the end of the PResMN.
     UINT32                  presTimeSecondLe;               ///< In case of ring redundancy this parameter contains the PRes Response Time [ns] for the secondary direction of communication starting from the end of the PResMN. Otherwise this parameter shall be ignored.
@@ -208,7 +237,7 @@ typedef struct
 */
 typedef union
 {
-    tSyncRequest            syncRequest;                    ///< Used in PollResponse Chaining mode. (Offset 23)
+    tSyncRequest            syncRequest;                    ///< Used in PollResponse Chaining mode. (Offset 24)
 } tSoaPayload;
 
 /**
@@ -229,7 +258,8 @@ typedef struct
     UINT8                   reqServiceId;                   ///< Indicates the asynchronous service ID dedicated to the SoA and to the following asynchronous slot (refer below). (Offset 20)
     UINT8                   reqServiceTarget;               ///< Indicates the POWERLINK address of the node, which is allowed to send. (Offset 21)
     UINT8                   powerlinkVersion;               ///< Indicates the current POWERLINK Version of the MN (Offset 22)
-    tSoaPayload             payload;                        ///< SoA Payload (Offset 23)
+    UINT8                   flag3;                          ///< Indicates if MN redundancy is active (Offset 23)
+    tSoaPayload             payload;                        ///< SoA Payload (Offset 24)
 } PACK_STRUCT tSoaFrame;
 
 /**
@@ -439,7 +469,7 @@ typedef struct
     UINT8                   aDstMac[6];                     ///< Contains the MAC address of the addressed nodes (Offset 0)
     UINT8                   aSrcMac[6];                     ///< Contains the MAC address of the transmitting node (Offset 6)
     UINT16                  etherType;                      ///< Contains the Ethernet message type (big endian) (Offset 12)
-    UINT8                   messageType;                    ///< Contains the POWERLINK message type (Offset 14)
+    tMsgType                messageType;                    ///< Contains the POWERLINK message type (Offset 14)
     UINT8                   dstNodeId;                      ///< Contains the POWERLINK node ID of the addressed nodes (Offset 15)
     UINT8                   srcNodeId;                      ///< Contains the POWERLINK node ID of the transmitting node (Offset 16)
     tFrameData              data;                           ///< Contains the Frame Data (Offset 17)
@@ -449,23 +479,5 @@ typedef struct
 #ifdef _MSC_VER
 #pragma pack(pop, packing)
 #endif
-
-/**
-* \brief Message type
-*
-* This enumeration defines the POWERLINK message type IDs.
-*
-* For more information consult the POWERLINK specification document "EPSG DS 301 V1.2.0" on page 349.
-*/
-typedef enum
-{
-    kMsgTypeNonPowerlink        = 0x00,                     ///< Defines non POWERLINK Frame
-    kMsgTypeSoc                 = 0x01,                     ///< Defines Start of Cycle Frame
-    kMsgTypePreq                = 0x03,                     ///< Defines Poll Request Frame
-    kMsgTypePres                = 0x04,                     ///< Defines Poll Response Frame
-    kMsgTypeSoa                 = 0x05,                     ///< Defines Start of Asynchronous Cycle Frame
-    kMsgTypeAsnd                = 0x06,                     ///< Defines Asynchronous Send Frame
-    kMsgTypeAInv                = 0x0D,                     ///< Defines Asynchronous Invite Frame
-} tMsgType;
 
 #endif /* _INC_oplk_frame_H_ */

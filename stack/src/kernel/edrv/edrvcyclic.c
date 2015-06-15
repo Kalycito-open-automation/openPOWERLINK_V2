@@ -12,7 +12,7 @@ It implements time-triggered transmission of frames necessary for MN.
 
 /*------------------------------------------------------------------------------
 Copyright (c) 2013, SYSTEC electronic GmbH
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -42,6 +42,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // includes
 //------------------------------------------------------------------------------
 #include <common/oplkinc.h>
+#include <kernel/edrvcyclic.h>
 #include <kernel/edrv.h>
 #include <kernel/hrestimer.h>
 
@@ -166,7 +167,7 @@ tOplkError edrvcyclic_init(void)
 
 //------------------------------------------------------------------------------
 /**
-\brief  Cyclic Ethernet driver shutdown
+\brief  Shut down cyclic Ethernet driver
 
 This function shuts down the cyclic Ethernet driver.
 
@@ -175,7 +176,7 @@ This function shuts down the cyclic Ethernet driver.
 \ingroup module_edrv
 */
 //------------------------------------------------------------------------------
-tOplkError edrvcyclic_shutdown(void)
+tOplkError edrvcyclic_exit(void)
 {
     if (edrvcyclicInstance_l.ppTxBufferList != NULL)
     {
@@ -344,19 +345,29 @@ Exit:
 
 This function stops the cycles.
 
+\param  fKeepCycle_p    If TRUE, just stop transmission (i.e. slot timer),
+                        but keep cycle timer running.
+
 \return The function returns a tOplkError error code.
 
 \ingroup module_edrv
 */
 //------------------------------------------------------------------------------
-tOplkError edrvcyclic_stopCycle(void)
+tOplkError edrvcyclic_stopCycle(BOOL fKeepCycle_p)
 {
     tOplkError ret = kErrorOk;
 
-    ret = hrestimer_deleteTimer(&edrvcyclicInstance_l.timerHdlCycle);
+    if (!fKeepCycle_p)
+    {
+        ret = hrestimer_deleteTimer(&edrvcyclicInstance_l.timerHdlCycle);
+    }
 #if (EDRV_USE_TTTX == FALSE)
     ret = hrestimer_deleteTimer(&edrvcyclicInstance_l.timerHdlSlot);
 #endif
+
+    // clear current and next Tx buffer list
+    OPLK_MEMSET(edrvcyclicInstance_l.ppTxBufferList, 0,
+                sizeof(*edrvcyclicInstance_l.ppTxBufferList) * edrvcyclicInstance_l.maxTxBufferCount * 2);
 
 #if CONFIG_EDRV_CYCLIC_USE_DIAGNOSTICS != FALSE
     edrvcyclicInstance_l.startCycleTimeStamp = 0;

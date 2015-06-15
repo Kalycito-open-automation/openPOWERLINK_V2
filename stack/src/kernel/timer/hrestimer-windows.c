@@ -12,7 +12,7 @@ timer module for Windows.
 
 /*------------------------------------------------------------------------------
 Copyright (c) 2012, SYSTEC electronic GmbH
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -52,9 +52,19 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // const defines
 //------------------------------------------------------------------------------
 
-#define TIMER_COUNT                 2
-#define TIMERHDL_MASK               0x0FFFFFFF
-#define TIMERHDL_SHIFT              28
+#define TIMER_COUNT           2            ///< number of high-resolution timers
+
+#define HRTIMER_HDL_EVENT     0
+#define HRTIMER_HDL_TIMER0    1
+#define HRTIMER_HDL_TIMER1    2
+#define HRTIMER_HDL_COUNT     3
+
+/* macros for timer handles */
+#define TIMERHDL_MASK         0x0FFFFFFF
+#define TIMERHDL_SHIFT        28
+#define HDL_TO_IDX(Hdl)       ((Hdl >> TIMERHDL_SHIFT) - 1)
+#define HDL_INIT(Idx)         ((Idx + 1) << TIMERHDL_SHIFT)
+#define HDL_INC(Hdl)          (((Hdl + 1) & TIMERHDL_MASK) | (Hdl & ~TIMERHDL_MASK))
 
 //------------------------------------------------------------------------------
 // module global vars
@@ -63,10 +73,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //------------------------------------------------------------------------------
 // global function prototypes
 //------------------------------------------------------------------------------
-
-/* Currently, timers will be created in edrv module. Therefore, we need to
-   get the timer handle. This dependancy should be removed! */
-HANDLE edrv_getTimerHandle(UINT index_p);
 
 //============================================================================//
 //          P R I V A T E   D E F I N I T I O N S                             //
@@ -100,30 +106,35 @@ The structure defines a high-resolution timer module instance.
 typedef struct
 {
     tHresTimerInfo      aTimerInfo[TIMER_COUNT];    ///< Array with timer information for a set of timers
-    HINSTANCE           hInstLibNtDll;              ///< Instance handle of the loaded NT kernel DLL
+    HANDLE              threadHandle;               ///< Handle of the hrtimer worker thread
+    HANDLE              aHandle[HRTIMER_HDL_COUNT]; ///< Array of event handles of the hrtimer
 } tHresTimerInstance;
 
-
-// function types from NTDLL.DLL
-typedef LONG (NTAPI* NTQUERYTIMERRESOLUTION)(OUT PULONG MinimumResolution,
-                                             OUT PULONG MaximumResolution,
-                                             OUT PULONG CurrentResolution);
-typedef LONG (NTAPI* NTSETTIMERRESOLUTION)(IN ULONG DesiredResolution,
-                                           IN BOOLEAN SetResolution,
-                                           OUT PULONG CurrentResolution);
+// Function prototypes for undocumented ntdll.dll functions
+typedef LONG (NTAPI* tNtQueryTimerResolution)(OUT PULONG MinimumResolution,
+                                              OUT PULONG MaximumResolution,
+                                              OUT PULONG CurrentResolution);
+typedef LONG (NTAPI* tNtSetTimerResolution)(IN ULONG DesiredResolution,
+                                            IN BOOLEAN SetResolution,
+                                            OUT PULONG CurrentResolution);
 
 //------------------------------------------------------------------------------
 // module local vars
 //------------------------------------------------------------------------------
-static tHresTimerInstance   hresTimerInstance_l;
-// function pointers to NTDLL.DLL
-NTQUERYTIMERRESOLUTION      NtQueryTimerResolution;
-NTSETTIMERRESOLUTION        NtSetTimerResolution;
+static tHresTimerInstance       hresTimerInstance_l;
+static HINSTANCE                hInstLibNtDll_l;            ///< Instance handle of the loaded NT kernel DLL
+
+// Function pointers to undocumented ntdll.dll functions
+static tNtQueryTimerResolution  NtQueryTimerResolution;
+static tNtSetTimerResolution    NtSetTimerResolution;
 
 //------------------------------------------------------------------------------
 // local function prototypes
 //------------------------------------------------------------------------------
-
+static tOplkError   setMaxTimerResolution(void);
+static void         restoreTimerResolution(void);
+static void         callTimerCb(UINT index_p);
+static DWORD WINAPI timerThread(LPVOID pArgument_p);
 
 //============================================================================//
 //            P U B L I C   F U N C T I O N S                                 //
@@ -142,91 +153,75 @@ The function initializes the high-resolution timer module
 //------------------------------------------------------------------------------
 tOplkError hrestimer_init(void)
 {
-    return hrestimer_addInstance();
-}
-
-//------------------------------------------------------------------------------
-/**
-\brief    Add instance of high-resolution timer module
-
-The function adds an instance of the high-resolution timer module.
-
-\return Returns a tOplkError error code.
-
-\ingroup module_hrestimer
-*/
-//------------------------------------------------------------------------------
-tOplkError hrestimer_addInstance(void)
-{
     tOplkError      ret = kErrorOk;
-    LONG            winRet = 0;
-    ULONG           min = ~0UL;
-    ULONG           max = ~0UL;
-    ULONG           current = ~0UL;
+    DWORD           threadId;
 
+    // Set the system timer to maximum resolution
+    ret = setMaxTimerResolution();
+    if (ret != kErrorOk)
+        return ret;
+
+    // Clear the module instance strucutre
     OPLK_MEMSET(&hresTimerInstance_l, 0, sizeof(hresTimerInstance_l));
 
-    // load NTDLL.DLL
-    hresTimerInstance_l.hInstLibNtDll = LoadLibrary("ntdll.dll");
-    if (hresTimerInstance_l.hInstLibNtDll == NULL)
+    // Create two unnamed waitable timers
+    hresTimerInstance_l.aHandle[HRTIMER_HDL_TIMER0] = CreateWaitableTimer(NULL, FALSE, NULL);
+    if (hresTimerInstance_l.aHandle[HRTIMER_HDL_TIMER0] == NULL)
     {
-        DEBUG_LVL_ERROR_TRACE("LoadLibrary(ntdll.dll) failed (%d)\n", GetLastError());
+        DEBUG_LVL_ERROR_TRACE("CreateWaitableTimer failed (%d)\n", GetLastError());
         return kErrorNoResource;
     }
 
-    // load proc address of NtQueryTimerResolution
-    NtQueryTimerResolution = (NTQUERYTIMERRESOLUTION)GetProcAddress(hresTimerInstance_l.hInstLibNtDll,
-                                                                    "NtQueryTimerResolution");
-    if (NtQueryTimerResolution == NULL)
+    hresTimerInstance_l.aHandle[HRTIMER_HDL_TIMER1] = CreateWaitableTimer(NULL, FALSE, NULL);
+    if (hresTimerInstance_l.aHandle[HRTIMER_HDL_TIMER1] == NULL)
     {
-        DEBUG_LVL_ERROR_TRACE("GetProcAddress(NtQueryTimerResolution) failed (%d)\n", GetLastError());
+        DEBUG_LVL_ERROR_TRACE("CreateWaitableTimer failed (%d)\n", GetLastError());
         return kErrorNoResource;
     }
 
-    // load proc address of NtSetTimerResolution
-    NtSetTimerResolution = (NTSETTIMERRESOLUTION)GetProcAddress(hresTimerInstance_l.hInstLibNtDll,
-                                                                "NtSetTimerResolution");
-    if (NtSetTimerResolution == NULL)
-    {
-        DEBUG_LVL_ERROR_TRACE("GetProcAddress(NtSetTimerResolution) failed (%d)\n", GetLastError());
-        return kErrorNoResource;
-    }
+    // Create event for signalling shutdown
+    hresTimerInstance_l.aHandle[HRTIMER_HDL_EVENT] = CreateEvent(NULL, FALSE, FALSE, NULL);
 
-    // query actual timer resolution
-    NtQueryTimerResolution(&min, &max, &current);
-    DEBUG_LVL_ERROR_TRACE("TimerResolution Min = %lu, Max = %lu, Cur = %lu\n", min, max, current);
-
-    // set timer resolution to maximum
-    winRet = NtSetTimerResolution(max, TRUE, &current);
-    DEBUG_LVL_ERROR_TRACE("NtSetTimerResolution returnd %ld, current resolution = %lu\n", winRet, current);
+    // Create the thread to begin execution on its own
+    hresTimerInstance_l.threadHandle = CreateThread(NULL, 0, timerThread, NULL, 0, &threadId);
+    if (hresTimerInstance_l.threadHandle == NULL)
+         return kErrorNoResource;
 
     return ret;
 }
 
 //------------------------------------------------------------------------------
 /**
-\brief    Delete instance of high-resolution timer module
+\brief    Shut down high-resolution timer module
 
-The function deletes an instance of the high-resolution timer module.
+The function shuts down the high-resolution timer module.
 
 \return Returns a tOplkError error code.
 
 \ingroup module_hrestimer
 */
 //------------------------------------------------------------------------------
-tOplkError hrestimer_delInstance(void)
+tOplkError hrestimer_exit(void)
 {
     tOplkError      ret = kErrorOk;
-    LONG            winRet = 0;
-    ULONG           current = ~0UL;
 
-    // set timer resolution to old value
-    winRet = NtSetTimerResolution(0, FALSE, &current);
-    DEBUG_LVL_TIMERH_TRACE("NtSetTimerResolution returnd %ld, current resolution = %lu\n", winRet, current);
+    // Signal shutdown to the thread and wait for it to terminate
+    SetEvent(hresTimerInstance_l.aHandle[HRTIMER_HDL_EVENT]);
+    WaitForSingleObject(hresTimerInstance_l.threadHandle, INFINITE);
 
-    // free library NTDLL.DLL
-    FreeLibrary(hresTimerInstance_l.hInstLibNtDll);
-    hresTimerInstance_l.hInstLibNtDll = NULL;
+    // Close the thread and the signal event handle
+    CloseHandle(hresTimerInstance_l.threadHandle);
+    CloseHandle(hresTimerInstance_l.aHandle[HRTIMER_HDL_EVENT]);
+
+    // Close the timer handles
+    CloseHandle(hresTimerInstance_l.aHandle[HRTIMER_HDL_TIMER0]);
+    CloseHandle(hresTimerInstance_l.aHandle[HRTIMER_HDL_TIMER1]);
+
+    // Clear instance structure
+    OPLK_MEMSET(&hresTimerInstance_l, 0, sizeof(hresTimerInstance_l));
+
+    // Restore the standard timer resolution
+    restoreTimerResolution();
 
     return ret;
 }
@@ -268,25 +263,37 @@ tOplkError hrestimer_modifyTimer(tTimerHdl* pTimerHdl_p, ULONGLONG time_p,
     HANDLE                      hTimer;
     LARGE_INTEGER               dueTime;
 
+    // check pointer to handle
     if (pTimerHdl_p == NULL)
+    {
+        DEBUG_LVL_ERROR_TRACE("%s() Invalid timer handle\n", __func__);
         return kErrorTimerInvalidHandle;
+    }
 
     if (*pTimerHdl_p == 0)
-    {   // no timer created yet - search free timer info structure
+    {   // no timer created yet -> search free timer info structure
         pTimerInfo = &hresTimerInstance_l.aTimerInfo[0];
         for (index = 0; index < TIMER_COUNT; index++, pTimerInfo++)
         {
             if (pTimerInfo->pfnCallback == NULL)
-                break;      // free structure found
+            {   // free structure found
+                break;
+            }
         }
+
         if (index >= TIMER_COUNT)
+        {   // no free structure found
+            DEBUG_LVL_ERROR_TRACE("%s() Invalid timer index: %d\n", __func__, index);
             return kErrorTimerNoTimerCreated;
+        }
+        pTimerInfo->eventArg.timerHdl = HDL_INIT(index);
     }
     else
     {
-        index = (UINT)(*pTimerHdl_p >> TIMERHDL_SHIFT) - 1;
+        index = (UINT)HDL_TO_IDX(*pTimerHdl_p);
         if (index >= TIMER_COUNT)
         {   // invalid handle
+            DEBUG_LVL_ERROR_TRACE("%s() Invalid timer index: %d\n", __func__, index);
             return kErrorTimerInvalidHandle;
         }
         pTimerInfo = &hresTimerInstance_l.aTimerInfo[index];
@@ -294,8 +301,7 @@ tOplkError hrestimer_modifyTimer(tTimerHdl* pTimerHdl_p, ULONGLONG time_p,
 
     // increment timer handle (if timer expires right after this statement,
     // the user would detect an unknown timer handle and discard it)
-    pTimerInfo->eventArg.timerHdl = ((pTimerInfo->eventArg.timerHdl + 1) & TIMERHDL_MASK) |
-                                    ((index + 1) << TIMERHDL_SHIFT);
+    pTimerInfo->eventArg.timerHdl = HDL_INC(pTimerInfo->eventArg.timerHdl);
 
     // calculate duetime [100 ns] (negative value = relative time)
     dueTime.QuadPart = (LONGLONG)time_p / -100LL;
@@ -318,15 +324,15 @@ tOplkError hrestimer_modifyTimer(tTimerHdl* pTimerHdl_p, ULONGLONG time_p,
 
     *pTimerHdl_p = pTimerInfo->eventArg.timerHdl;
 
-    // configure timer
-    hTimer = edrv_getTimerHandle(index);
-
+    // Configure timer
+    hTimer = hresTimerInstance_l.aHandle[index + HRTIMER_HDL_TIMER0];
     fRet = SetWaitableTimer(hTimer, &dueTime, 0L, NULL, NULL, 0);
     if (!fRet)
     {
         DEBUG_LVL_ERROR_TRACE("SetWaitableTimer failed (%d)\n", GetLastError());
         return kErrorTimerNoTimerCreated;
     }
+
     return ret;
 }
 
@@ -351,18 +357,20 @@ tOplkError hrestimer_deleteTimer(tTimerHdl* pTimerHdl_p)
     tHresTimerInfo*             pTimerInfo;
     HANDLE                      hTimer;
 
+    DEBUG_LVL_TIMERH_TRACE("%s() Deleting timer: %lx\n", __func__, *pTimerHdl_p);
+
     if (pTimerHdl_p == NULL)
         return kErrorTimerInvalidHandle;
 
     if (*pTimerHdl_p == 0)
-    {
-        return ret;      // no timer created yet
+    {   // no timer created yet
+        return ret;
     }
     else
     {
-        index = (UINT)(*pTimerHdl_p >> TIMERHDL_SHIFT) - 1;
+        index = (UINT)HDL_TO_IDX(*pTimerHdl_p);
         if (index >= TIMER_COUNT)
-        {
+        {   // invalid handle
             return kErrorTimerInvalidHandle;
         }
         pTimerInfo = &hresTimerInstance_l.aTimerInfo[index];
@@ -373,18 +381,96 @@ tOplkError hrestimer_deleteTimer(tTimerHdl* pTimerHdl_p)
     }
 
     pTimerInfo->pfnCallback = NULL;
-
     *pTimerHdl_p = 0;
 
-    // cancel timer
-    hTimer = edrv_getTimerHandle(index);
+    // Cancel timer
+    hTimer = hresTimerInstance_l.aHandle[index + HRTIMER_HDL_TIMER0];
     CancelWaitableTimer(hTimer);
+    return ret;
+}
+
+//============================================================================//
+//            P R I V A T E   F U N C T I O N S                               //
+//============================================================================//
+/// \name Private Functions
+/// \{
+
+//------------------------------------------------------------------------------
+/**
+\brief  Set maximum timer resolution
+
+This function sets the system timer to the maximum possible resolution.
+
+\return Returns a tOplkError error code.
+*/
+//------------------------------------------------------------------------------
+static tOplkError setMaxTimerResolution(void)
+{
+    tOplkError ret = kErrorOk;
+    LONG       winRet = 0;
+    ULONG      min = ~0UL;
+    ULONG      max = ~0UL;
+    ULONG      current = ~0UL;
+
+    // Load ntdll.dll
+    hInstLibNtDll_l = LoadLibrary("ntdll.dll");
+    if (hInstLibNtDll_l == NULL)
+    {
+        DEBUG_LVL_ERROR_TRACE("LoadLibrary(ntdll.dll) failed (%d)\n", GetLastError());
+        return kErrorNoResource;
+    }
+
+    // Load address of NtQueryTimerResolution() function
+    NtQueryTimerResolution = (tNtQueryTimerResolution)GetProcAddress(hInstLibNtDll_l, "NtQueryTimerResolution");
+    if (NtQueryTimerResolution == NULL)
+    {
+        DEBUG_LVL_ERROR_TRACE("GetProcAddress(NtQueryTimerResolution) failed (%d)\n", GetLastError());
+        return kErrorNoResource;
+    }
+
+    // Load address of NtSetTimerResolution() function
+    NtSetTimerResolution = (tNtSetTimerResolution)GetProcAddress(hInstLibNtDll_l, "NtSetTimerResolution");
+    if (NtSetTimerResolution == NULL)
+    {
+        DEBUG_LVL_ERROR_TRACE("GetProcAddress(NtSetTimerResolution) failed (%d)\n", GetLastError());
+        return kErrorNoResource;
+    }
+
+    // Query current timer resolution
+    NtQueryTimerResolution(&min, &max, &current);
+    DEBUG_LVL_ERROR_TRACE("TimerResolution Min = %lu, Max = %lu, Cur = %lu\n", min, max, current);
+
+    // Set timer resolution to maximum
+    winRet = NtSetTimerResolution(max, TRUE, &current);
+    DEBUG_LVL_ERROR_TRACE("NtSetTimerResolution returned %ld, current resolution = %lu\n", winRet, current);
+
     return ret;
 }
 
 //------------------------------------------------------------------------------
 /**
-\brief    Timer callback function
+\brief  Restore standard timer resolution
+
+This function resets the system timer resolution to the standard value.
+*/
+//------------------------------------------------------------------------------
+static void restoreTimerResolution(void)
+{
+    LONG  winRet = 0;
+    ULONG current = ~0UL;
+
+    // Reset timer resolution to old value
+    winRet = NtSetTimerResolution(0, FALSE, &current);
+    DEBUG_LVL_TIMERH_TRACE("NtSetTimerResolution returnd %ld, current resolution = %lu\n", winRet, current);
+
+    // Free library NTDLL.DLL
+    FreeLibrary(hInstLibNtDll_l);
+    hInstLibNtDll_l = NULL;
+}
+
+//------------------------------------------------------------------------------
+/**
+\brief    Call a timer callback function
 
 The function implements the timer callback function. It is called when a timer
 expires.
@@ -392,23 +478,21 @@ expires.
 \param  index_p     Index of timer (0 or 1)
 */
 //------------------------------------------------------------------------------
-void hresTimerCb(UINT index_p)
+static void callTimerCb(UINT index_p)
 {
     tHresTimerInfo* pTimerInfo;
 
-    if (index_p > TIMER_COUNT)
-        return;     // invalid handle
-
+    // Get the timer info according to the index
     pTimerInfo = &hresTimerInstance_l.aTimerInfo[index_p];
 
+    // Check if the timer is a periodic timer
     if (pTimerInfo->dueTime.QuadPart != 0)
-    {   // periodic timer
+    {
         HANDLE  hTimer;
         BOOL    fRet;
 
-        // configure timer
-        hTimer = edrv_getTimerHandle(index_p);
-
+        // Set up the timer again
+        hTimer = hresTimerInstance_l.aHandle[index_p + HRTIMER_HDL_TIMER0];
         fRet = SetWaitableTimer(hTimer, &pTimerInfo->dueTime, 0L, NULL, NULL, 0);
         if (!fRet)
         {
@@ -417,9 +501,63 @@ void hresTimerCb(UINT index_p)
         }
     }
 
+    // If a callback function is given, call it
     if (pTimerInfo->pfnCallback != NULL)
     {
         pTimerInfo->pfnCallback(&pTimerInfo->eventArg);
     }
-    return;
 }
+
+//------------------------------------------------------------------------------
+/**
+\brief  hrestimer worker thread
+
+This function implements the hrestimer worker thread. It is responsible to handle
+timer events.
+
+\param  pArgument_p    Thread argument (unused!)
+
+\return The function returns a thread return code
+*/
+//------------------------------------------------------------------------------
+static DWORD WINAPI timerThread(LPVOID pArgument_p)
+{
+    UINT32               waitRet;
+
+    UNUSED_PARAMETER(pArgument_p);
+
+    // Increase thread priority
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+
+    // Loop forever until thread is canceled
+    while (TRUE)
+    {
+        // Wait for events
+        waitRet = WaitForMultipleObjects(HRTIMER_HDL_COUNT, hresTimerInstance_l.aHandle, FALSE, INFINITE);
+        switch (waitRet)
+        {
+            case WAIT_OBJECT_0 + HRTIMER_HDL_EVENT:
+                // Shutdown was signalled
+                return 0;
+
+            case WAIT_OBJECT_0 + HRTIMER_HDL_TIMER0:
+                // Timer 0 triggered
+                callTimerCb(0);
+                break;
+
+            case WAIT_OBJECT_0 + HRTIMER_HDL_TIMER1:
+                // Timer 1 triggered
+                callTimerCb(1);
+                break;
+
+            default:
+            case WAIT_FAILED:
+                DEBUG_LVL_ERROR_TRACE("WaitForMultipleObjects failed (%d)\n", GetLastError());
+                break;
+        }
+    }
+
+    return 0;
+}
+
+/// \}

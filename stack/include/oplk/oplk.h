@@ -64,7 +64,9 @@ typedef enum
     tOplkApiAsndFilterNone      = 0x00,
     tOplkApiAsndFilterLocal     = 0x01,  // receive only ASnd frames with local or broadcast node ID
     tOplkApiAsndFilterAny       = 0x02,  // receive any ASnd frame
-} tOplkApiAsndFilter;
+} eOplkApiAsndFilter;
+
+typedef UINT32 tOplkApiAsndFilter;
 
 /**
 \brief SDO stack
@@ -77,8 +79,14 @@ typedef enum
     tOplkApiStdSdoStack         = 0x00,  // Use the standard SDO stack (default)
     tOplkApiTestSdoCom          = 0x10,  // Use testing functions for SDO command layer
     tOplkApiTestSdoSeq          = 0x20   // Use testing functions for SDO sequence layer
-} tOplkApiSdoStack;
+} eOplkApiSdoStack;
 
+/**
+\brief SDO stack data type
+
+Data type for the enumerator \ref eOplkApiSdoStack.
+*/
+typedef UINT32 tOplkApiSdoStack;
 
 /**
 \brief Node event
@@ -327,8 +335,14 @@ typedef enum
     received SDO sequence layer. (\ref tOplkApiEventReceivedSdoSeq). */
     kOplkApiEventReceivedSdoSeq     = 0x84,
 
-} tOplkApiEventType;
+} eOplkApiEventType;
 
+/**
+\brief Application event data type
+
+Data type for the enumerator \ref eOplkApiEventType.
+*/
+typedef UINT32 tOplkApiEventType;
 
 /**
 \brief Event argument
@@ -488,6 +502,8 @@ OPLKDLLEXPORT tOplkError oplk_getIdentResponse(UINT nodeId_p, tIdentResponse** p
 OPLKDLLEXPORT tOplkError oplk_getEthMacAddr(UINT8* pMacAddr_p);
 OPLKDLLEXPORT BOOL       oplk_checkKernelStack(void);
 OPLKDLLEXPORT tOplkError oplk_waitSyncEvent(ULONG timeout_p);
+OPLKDLLEXPORT UINT32     oplk_getVersion(void);
+OPLKDLLEXPORT UINT32     oplk_getStackConfiguration(void);
 
 // Process image API functions
 OPLKDLLEXPORT tOplkError oplk_allocProcessImage(UINT sizeProcessImageIn_p, UINT sizeProcessImageOut_p);

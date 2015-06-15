@@ -84,12 +84,12 @@ SET(DEMO_ARCH_SOURCES
     ${DEMO_ARCHSOURCES}
     ${COMMON_SOURCE_DIR}/gpio/gpio-zynqarm.c
     ${COMMON_SOURCE_DIR}/lcd/lcdl-null.c
+    ${COMMON_SOURCE_DIR}/system/system-zynqarm.c
    )
 
 INCLUDE_DIRECTORIES(
                     ${XIL_BSP_DIR}/include
                     ${OPLK_ROOT_DIR}/stack/src/arch/xilinx-zynqarm
-                    ${COMMON_SOURCE_DIR}/gpio
                    )
 
 IF(CFG_CDC_ON_SD)
@@ -101,15 +101,14 @@ IF(CFG_CDC_ON_SD)
 
     INCLUDE_DIRECTORIES(
                         ${SDFAT16_DIR}/include
-                        ${COMMON_SOURCE_DIR}/sdcard
                        )
 
 ENDIF()
 
 ################################################################################
 # Set architecture specific definitions
-ADD_DEFINITIONS(${XIL_HOST_CFLAGS} "-fmessage-length=0 -mcpu=${CFG_HOST_CPU_VERSION} -ffunction-sections -fdata-sections -fno-inline")
-
+SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${XIL_HOST_CFLAGS} -fmessage-length=0 -mcpu=${CFG_HOST_CPU_VERSION} -ffunction-sections -fdata-sections -fno-inline")
+ADD_DEFINITIONS(-D__XILINX_ARM__)
 ################################################################################
 # Set architecture specific linker flags
 SET(ARCH_LINKER_FLAGS "${XIL_HOST_PLAT_ENDIAN} -mcpu=${CFG_HOST_CPU_VERSION} -Wl,-T -Wl,${LSSCRIPT} -Wl,-Map,${PROJECT_NAME}.map " )

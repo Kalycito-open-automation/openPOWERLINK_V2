@@ -10,8 +10,8 @@ This file contains the implementation of the NMT user module.
 *******************************************************************************/
 
 /*------------------------------------------------------------------------------
-Copyright (c) 2013, SYSTEC electronic GmbH
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, SYSTEC electronic GmbH
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -122,38 +122,22 @@ The function initializes an instance of the NMT user module
 //------------------------------------------------------------------------------
 tOplkError nmtu_init(void)
 {
-    return nmtu_addInstance();
-}
-
-//------------------------------------------------------------------------------
-/**
-\brief  Add NMT user module instance
-
-The function adds an NMT user module instance
-
-\return The function returns a tOplkError error code.
-
-\ingroup module_nmtu
-*/
-//------------------------------------------------------------------------------
-tOplkError nmtu_addInstance(void)
-{
     nmtuInstance_g.pfnNmtChangeCb = NULL;
     return kErrorOk;
 }
 
 //------------------------------------------------------------------------------
 /**
-\brief  Delete NMT user module instance
+\brief  Shut down NMT user module instance
 
-The function deletes an NMT user module instance
+The function shuts down the NMT user module instance
 
 \return The function returns a tOplkError error code.
 
 \ingroup module_nmtu
 */
 //------------------------------------------------------------------------------
-tOplkError nmtu_delInstance(void)
+tOplkError nmtu_exit(void)
 {
     tOplkError ret = kErrorOk;
 
@@ -411,6 +395,10 @@ static BOOL processGeneralStateChange(tNmtState newNmtState_p, tOplkError* pRet_
     tOplkError          ret = kErrorOk;
     UINT                nodeId;
     BOOL                fHandled = TRUE;
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+    UINT32              startUp;
+    tObdSize            obdSize;
+#endif
 
     switch (newNmtState_p)
     {
@@ -445,6 +433,18 @@ static BOOL processGeneralStateChange(tNmtState newNmtState_p, tOplkError* pRet_
             }
 #endif // NMT_MAX_NODE_ID > 0
 
+#if defined(CONFIG_INCLUDE_NMT_RMN)
+            obdSize = sizeof(startUp);
+            ret = obd_readEntry(0x1F80, 0x00, &startUp, &obdSize);
+            if (ret != kErrorOk)
+                break;
+
+            if ((startUp & NMT_STARTUP_REDUNDANCY) != 0)
+            {   // NMT_StartUp_U32.Bit14 == 1
+                ret = nmtu_postNmtEvent(kNmtEventEnterRmsNotActive);
+                break;
+            }
+#endif
             // get node ID from OD
             nodeId = obd_getNodeId();
             //check node ID if not should be master or slave
@@ -491,7 +491,7 @@ static BOOL processMnStateChange(tNmtState newNmtState_p, tOplkError* pRet_p)
     BOOL                fHandled = TRUE;
     UINT32              waitTime;
     UINT32              startUp;
-    tNmtEvent           timerEvent;
+    tNmtEvent           timerEvent = kNmtEventTimerMsPreOp1;
     tObdSize            obdSize;
 
     switch (newNmtState_p)
@@ -505,15 +505,13 @@ static BOOL processMnStateChange(tNmtState newNmtState_p, tOplkError* pRet_p)
             if (ret != kErrorOk)
                 break;
 
-            if ((startUp & NMT_STARTUP_BASICETHERNET) == 0)
-            {   // NMT_StartUp_U32.Bit13 == 0 -> new state PreOperational1
-                timerEvent = kNmtEventTimerMsPreOp1;
-            }
-            else
+            if ((startUp & NMT_STARTUP_BASICETHERNET) != 0)
             {   // NMT_StartUp_U32.Bit13 == 1 -> new state BasicEthernet
                 timerEvent = kNmtEventTimerBasicEthernet;
             }
 
+        // intentional fall through
+        case kNmtRmsNotActive:
             // read NMT_BootTime_REC.MNWaitNotAct_U32 from OD
             obdSize = sizeof(waitTime);
             ret = obd_readEntry(0x1F89, 0x01, &waitTime, &obdSize);

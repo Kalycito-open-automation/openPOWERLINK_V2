@@ -23,7 +23,7 @@ source for the high-resolution timer module.
 
 /*------------------------------------------------------------------------------
 Copyright (c) 2013, Kalycito Infotech Private Limited
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -54,6 +54,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //------------------------------------------------------------------------------
 #include <common/oplkinc.h>
 #include <kernel/edrv.h>
+#include <kernel/hrestimer.h>           // using definition of tHresCallback
 
 #include <linux/pci.h>
 #include <linux/interrupt.h>
@@ -688,7 +689,7 @@ tOplkError edrv_init(tEdrvInitParam* pEdrvInitParam_p)
     if (edrvInstance_l.pPciDev == NULL)
     {
         printk("%s pPciDev=NULL\n", __FUNCTION__);
-        ret = edrv_shutdown();
+        ret = edrv_exit();
         ret = kErrorNoResource;
         goto Exit;
     }
@@ -706,7 +707,7 @@ tOplkError edrv_init(tEdrvInitParam* pEdrvInitParam_p)
 
 //------------------------------------------------------------------------------
 /**
-\brief  Ethernet driver shutdown
+\brief  Shut down Ethernet driver
 
 This function shuts down the Ethernet driver.
 
@@ -715,7 +716,7 @@ This function shuts down the Ethernet driver.
 \ingroup module_edrv
 */
 //------------------------------------------------------------------------------
-tOplkError edrv_shutdown(void)
+tOplkError edrv_exit(void)
 {
     if (edrvDriver_l.name != NULL)
     {
@@ -726,7 +727,7 @@ tOplkError edrv_shutdown(void)
     }
     else
     {
-        printk("%s pci driver for openPOWERLINK already unregisted\n", __FUNCTION__);
+        printk("%s PCI driver for openPOWERLINK already unregistered\n", __FUNCTION__);
     }
     return kErrorOk;
 }

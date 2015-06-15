@@ -11,7 +11,7 @@ This file contains the implementation of the openMAC Ethernet driver.
 
 /*------------------------------------------------------------------------------
 Copyright (c) 2013, SYSTEC electronic GmbH
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -73,9 +73,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // const defines
 //------------------------------------------------------------------------------
 
-//comment the following lines to disable feature
-//#define EDRV_2NDTXQUEUE    //use additional TX queue for MN
-
 #if (CONFIG_EDRV_AUTO_RESPONSE == FALSE)
     #undef EDRV_MAX_AUTO_RESPONSES
     #define EDRV_MAX_AUTO_RESPONSES 0 //no auto-response used
@@ -92,15 +89,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #error "Please disable CONFIG_EDRV_AUTO_RESPONSE in oplkcfg.h to use openMAC for MN!"
 #endif
 
-#if (defined(EDRV_2NDTXQUEUE) && CONFIG_EDRV_TIME_TRIG_TX == FALSE)
-    #undef EDRV_2NDTXQUEUE //2nd TX queue makes no sense here..
-    #undef EDRV_MAX_TX_BUF2
+#ifndef CONFIG_EDRV_MAX_TX2_BUFFERS
+#define CONFIG_EDRV_MAX_TX2_BUFFERS 16
 #endif
 
 //------------------------------------------------------------------------------
 // local types
 //------------------------------------------------------------------------------
-#ifdef EDRV_2NDTXQUEUE
+#if CONFIG_EDRV_TIME_TRIG_TX != FALSE
 /**
 \brief Structure describing the second TX queue.
 
@@ -145,9 +141,9 @@ typedef struct
 #if OPENMAC_PKTLOCRX == OPENMAC_PKTBUF_LOCAL
     void*               pRxBufferBase;                          ///< Pointer to the RX buffer base address
 #endif
-#ifdef EDRV_2NDTXQUEUE
+#if CONFIG_EDRV_TIME_TRIG_TX != FALSE
     //additional tx queue
-    tEdrv2ndTxQueue     txQueue[EDRV_MAX_TX_BUF2];              ///< Array of buffers for the second TX queue
+    tEdrv2ndTxQueue     txQueue[CONFIG_EDRV_MAX_TX2_BUFFERS];   ///< Array of buffers for the second TX queue
     INT                 txQueueWriteIndex;                      ///< Current index in the queue for writes
     INT                 txQueueReadIndex;                       ///< Current index in the queue for reads
 #endif
@@ -157,12 +153,26 @@ typedef struct
 #if defined(CONFIG_INCLUDE_VETH)
     OMETH_HOOK_H        pRxVethHookInst;                        ///< Pointer to virtual Ethernet receive hook
 #endif
+#if CONFIG_EDRV_USE_DIAGNOSTICS != FALSE
+    UINT                asyncFrameDropCount;
+    UINT                vethFrameDropCount;
+    UINT                asyncBufFreedCount;
+    UINT                vethBufFreedCount;
+    UINT                asyncBufAcquiredCount;
+    UINT                vethBufAcquiredCount;
+#endif
 } tEdrvInstance;
 
 //------------------------------------------------------------------------------
 // local vars
 //------------------------------------------------------------------------------
 static tEdrvInstance edrvInstance_l;
+#if CONFIG_EDRV_USE_DIAGNOSTICS != FALSE
+static BYTE*    apASyncBufAddr[CONFIG_EDRV_ASND_DEFERRED_RX_BUFFERS] = {0};
+static BYTE*    apVEthBufAddr[CONFIG_EDRV_VETH_DEFERRED_RX_BUFFERS] = {0};
+static INT      asyncBufIdx = 0;
+static INT      vethBufIdx = 0;
+#endif
 
 //------------------------------------------------------------------------------
 // local function prototypes
@@ -291,7 +301,7 @@ tOplkError edrv_init(tEdrvInitParam* pEdrvInitParam_p)
     edrvInstance_l.pTxBufferBase = omethGetTxBufBase(edrvInstance_l.pMacInst);
 #elif OPENMAC_PKTLOCTX == OPENMAC_PKTBUF_LOCAL
     //get tx buffer base
-    edrvInstance_l.pTxBufferBase = openmac_memUncached((void*)OPENMAC_PKT_BASE, OPENMAC_PKT_SPAN);
+    edrvInstance_l.pTxBufferBase = OPENMAC_MEMUNCACHED((void*)OPENMAC_PKT_BASE, OPENMAC_PKT_SPAN);
 #endif
 
     omethStart(edrvInstance_l.pMacInst, TRUE);
@@ -311,7 +321,7 @@ Exit:
 
 //------------------------------------------------------------------------------
 /**
-\brief  Ethernet driver shutdown
+\brief  Shut down Ethernet driver
 
 This function shuts down the Ethernet driver.
 
@@ -320,7 +330,7 @@ This function shuts down the Ethernet driver.
 \ingroup module_edrv
 */
 //------------------------------------------------------------------------------
-tOplkError edrv_shutdown(void)
+tOplkError edrv_exit(void)
 {
     omethStop(edrvInstance_l.pMacInst);
 
@@ -354,6 +364,18 @@ tOplkError edrv_shutdown(void)
         }
         DEBUG_LVL_EDRV_TRACE("\n");
     }
+
+#if CONFIG_EDRV_USE_DIAGNOSTICS != FALSE
+    DEBUG_LVL_EDRV_TRACE(" ---    edrvDiagnostics    ---\n");
+    DEBUG_LVL_EDRV_TRACE(" ----  ASND Late Release  ----\n");
+    DEBUG_LVL_EDRV_TRACE("  Acquired ASync buffers = %u\n", edrvInstance_l.asyncBufAcquiredCount);
+    DEBUG_LVL_EDRV_TRACE("  Acquired ASync buffers = %u\n", edrvInstance_l.asyncBufFreedCount);
+    DEBUG_LVL_EDRV_TRACE("  Acquired VEth  buffers = %u\n", edrvInstance_l.vethBufAcquiredCount);
+    DEBUG_LVL_EDRV_TRACE("  Acquired VEth  buffers = %u\n", edrvInstance_l.vethBufFreedCount);
+    DEBUG_LVL_EDRV_TRACE("  Predicted ASync  frame drop count = %u\n", edrvInstance_l.asyncFrameDropCount);
+    DEBUG_LVL_EDRV_TRACE("  Predicted VEth  frame drop count = %u\n", edrvInstance_l.vethFrameDropCount);
+    DEBUG_LVL_EDRV_TRACE("\n");
+#endif
 
 #if OPENMAC_DMAOBSERV != 0
     if (edrvInstance_l.fDmaError == TRUE)
@@ -522,7 +544,7 @@ tOplkError edrv_updateTxBuffer(tEdrvTxBuffer* pBuffer_p)
     pPacket->length = pBuffer_p->txFrameSize;
 
     // Flush data cache before handing over the packet buffer to openMAC.
-    openmac_flushDataCache((UINT8*)pPacket, pPacket->length);
+    OPENMAC_FLUSHDATACACHE((UINT8*)pPacket, pPacket->length);
 
     // Update autoresponse buffer
     edrvInstance_l.apTxBuffer[pBuffer_p->txBufferNumber.value] = pBuffer_p;
@@ -574,9 +596,9 @@ tOplkError edrv_sendTxBuffer(tEdrvTxBuffer* pBuffer_p)
 
         if (txLength == 0)
         {
-#ifdef EDRV_2NDTXQUEUE
+#if CONFIG_EDRV_TIME_TRIG_TX != FALSE
             //time triggered sent failed => move to 2nd tx queue
-            if ((edrvInstance_l.txQueueWriteIndex - edrvInstance_l.txQueueReadIndex) >= EDRV_MAX_TX_BUF2)
+            if ((edrvInstance_l.txQueueWriteIndex - edrvInstance_l.txQueueReadIndex) >= CONFIG_EDRV_MAX_TX2_BUFFERS)
             {
                 DEBUG_LVL_ERROR_TRACE("%s() Edrv 2nd TX queue is full\n", __func__);
                 ret = kErrorEdrvNoFreeBufEntry;
@@ -584,7 +606,7 @@ tOplkError edrv_sendTxBuffer(tEdrvTxBuffer* pBuffer_p)
             }
             else
             {
-                tEdrv2ndTxQueue* pTxqueue = &edrvInstance_l.txQueue[edrvInstance_l.txQueueWriteIndex & (EDRV_MAX_TX_BUF2-1)];
+                tEdrv2ndTxQueue* pTxqueue = &edrvInstance_l.txQueue[edrvInstance_l.txQueueWriteIndex & (CONFIG_EDRV_MAX_TX2_BUFFERS-1)];
                 pTxqueue->pBuffer = pBuffer_p;
                 pTxqueue->timeOffsetAbs = pBuffer_p->timeOffsetAbs;
 
@@ -921,9 +943,42 @@ tOplkError edrv_releaseRxBuffer(tEdrvRxBuffer* pRxBuffer_p)
 {
     tOplkError          ret = kErrorOk;
     ometh_packet_typ*   pPacket = NULL;
+#if CONFIG_EDRV_USE_DIAGNOSTICS != FALSE
+    INT                 i = 0;
+#endif
 
     pPacket = GET_TYPE_BASE(ometh_packet_typ, data, pRxBuffer_p->pBuffer);
     pPacket->length = pRxBuffer_p->rxFrameSize;
+
+#if CONFIG_EDRV_USE_DIAGNOSTICS != FALSE
+    for (i = 0; i < CONFIG_EDRV_ASND_DEFERRED_RX_BUFFERS; i++)
+    {
+        if (apASyncBufAddr[i] == pPacket)
+        {
+            edrvInstance_l.asyncBufFreedCount++;
+            apASyncBufAddr[i] = 0;
+            break;
+        }
+    }
+
+    if (i >= CONFIG_EDRV_ASND_DEFERRED_RX_BUFFERS)
+    {
+        for (i = 0; i < CONFIG_EDRV_VETH_DEFERRED_RX_BUFFERS; i++)
+        {
+            if (apVEthBufAddr[i] == pPacket)
+            {
+                edrvInstance_l.vethBufFreedCount++;
+                apVEthBufAddr[i] = 0;
+                break;
+            }
+        }
+
+        if (i >= CONFIG_EDRV_VETH_DEFERRED_RX_BUFFERS)
+        {
+            DEBUG_LVL_ERROR_TRACE("Unknown buffer packet released!!\n");
+        }
+    }
+#endif
 
     if (pPacket->length != 0)
     {
@@ -1079,7 +1134,7 @@ static ometh_packet_typ* allocTxMsgBufferIntern(tEdrvTxBuffer* pBuffer_p)
 {
     ometh_packet_typ*   pPacket;
     UINT                bufferSize;
-    void*               pBufferBase = openmac_memUncached((void*)OPENMAC_PKT_BASE, OPENMAC_PKT_SPAN);
+    void*               pBufferBase = OPENMAC_MEMUNCACHED((void*)OPENMAC_PKT_BASE, OPENMAC_PKT_SPAN);
 
     // Initialize if no buffer is allocated
     if (edrvInstance_l.txBufferCount == 0)
@@ -1168,7 +1223,7 @@ static void irqHandler(void* pArg_p)
 {
     BENCHMARK_MOD_01_SET(1);
 #if OPENMAC_DMAOBSERV != 0
-    UINT16 dmaObservVal = openmac_getDmaObserver(0);
+    UINT16 dmaObservVal = OPENMAC_GETDMAOBSERVER();
 
     //read DMA observer feature
     if (dmaObservVal != 0)
@@ -1181,7 +1236,7 @@ static void irqHandler(void* pArg_p)
     }
 #endif
 
-#if (defined(EDRV_2NDTXQUEUE) && (CONFIG_EDRV_TIME_TRIG_TX != FALSE))
+#if CONFIG_EDRV_TIME_TRIG_TX != FALSE
     //observe additional TX queue and send packet if necessary
     while ((edrvInstance_l.txQueueWriteIndex - edrvInstance_l.txQueueReadIndex) &&
            (omethTransmitPending(edrvInstance_l.pMacInst) < 16U))
@@ -1189,7 +1244,7 @@ static void irqHandler(void* pArg_p)
         tEdrvTxBuffer*      pBuffer_p;
         ometh_packet_typ*   pPacket;
         ULONG               txLength = 0U;
-        tEdrv2ndTxQueue*    pTxqueue = &edrvInstance_l.txQueue[edrvInstance_l.txQueueReadIndex & (EDRV_MAX_TX_BUF2-1)];
+        tEdrv2ndTxQueue*    pTxqueue = &edrvInstance_l.txQueue[edrvInstance_l.txQueueReadIndex & (CONFIG_EDRV_MAX_TX2_BUFFERS-1)];
         pBuffer_p = pTxqueue->pBuffer;
 
         pPacket = GET_TYPE_BASE(ometh_packet_typ, data, pBuffer_p->pBuffer);
@@ -1277,12 +1332,51 @@ static INT rxHook(void* pArg_p, ometh_packet_typ* pPacket_p, OMETH_BUF_FREE_FCT*
 
     // Before handing over the Rx packet to the stack invalidate the packet's
     // memory range.
-    openmac_invalidateDataCache((UINT8*)pPacket_p, pPacket_p->length);
+    OPENMAC_INVALIDATEDATACACHE((UINT8*)pPacket_p, pPacket_p->length);
 
     releaseRxBuffer = edrvInstance_l.initParam.pfnRxHandler(&rxBuffer); //pass frame to Powerlink Stack
 
     if (releaseRxBuffer == kEdrvReleaseRxBufferLater)
+    {
+#if CONFIG_EDRV_USE_DIAGNOSTICS != FALSE
+        // Store packet address in an array
+        if (DLLK_FILTER_ASND == (int)pArg_p)
+        {
+            if (apASyncBufAddr[asyncBufIdx] != 0)
+            {
+                edrvInstance_l.asyncFrameDropCount++;
+                DEBUG_LVL_EDRV_TRACE("The previous ASync buffer(0x%08X) @index %d is not freed!!\n", apASyncBufAddr[asyncBufIdx], asyncBufIdx);
+            }
+
+            apASyncBufAddr[asyncBufIdx++] = (BYTE*)pPacket_p;
+            edrvInstance_l.asyncBufAcquiredCount++;
+            if (asyncBufIdx >= CONFIG_EDRV_ASND_DEFERRED_RX_BUFFERS)
+            {
+                asyncBufIdx = 0;
+            }
+        }
+        else if ((DLLK_FILTER_VETH_BROADCAST== (int)pArg_p) || (DLLK_FILTER_VETH_UNICAST == (int)pArg_p))
+        {
+            if (apVEthBufAddr[vethBufIdx] != 0)
+            {
+                edrvInstance_l.vethFrameDropCount++;
+                DEBUG_LVL_EDRV_TRACE("The previous VEth buffer(0x%08X) @index %d is not freed!!\n", apVEthBufAddr[vethBufIdx], vethBufIdx);
+            }
+
+            apVEthBufAddr[vethBufIdx++] = (BYTE*)pPacket_p;
+            edrvInstance_l.vethBufAcquiredCount++;
+            if (vethBufIdx >= CONFIG_EDRV_VETH_DEFERRED_RX_BUFFERS)
+            {
+                vethBufIdx = 0;
+            }
+        }
+        else
+        {
+            DEBUG_LVL_EDRV_TRACE("Unrecognized ASND frame received!!\n");
+        }
+#endif
         ret = 0; // Packet is deferred, openMAC may not use this buffer!
+    }
     else
         ret = -1; // Packet processing is done, returns to openMAC again
 

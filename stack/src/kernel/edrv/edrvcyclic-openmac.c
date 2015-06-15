@@ -12,7 +12,7 @@ It implements time-triggered transmission of frames necessary for MN.
 
 /*------------------------------------------------------------------------------
 Copyright (c) 2013, SYSTEC electronic GmbH
-Copyright (c) 2014, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
+Copyright (c) 2015, Bernecker+Rainer Industrie-Elektronik Ges.m.b.H. (B&R)
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -42,6 +42,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // includes
 //------------------------------------------------------------------------------
 #include <common/oplkinc.h>
+#include <kernel/edrvcyclic.h>
 #include <kernel/edrv.h>
 #include <kernel/hrestimer.h>
 #include <oplk/benchmark.h>
@@ -115,7 +116,7 @@ typedef struct
     UINT                maxTxBufferCount;                           ///< Maximum TX buffer count
     UINT                currrentTxBufferList;                       ///< Current TX buffer list
     UINT                currentTxBufferEntry;                       ///< Current TX buffer entry
-    UINT32              cycleLengthUs;                              ///< Cycle time (µs)
+    UINT32              cycleLengthUs;                              ///< Cycle time (us)
     tTimerHdl           timerHdlCycle;                              ///< Handle of the cycle timer
     tEdrvCyclicCbSync   pfnSyncCb;                                  ///< Function pointer to the sync callback function
     tEdrvCyclicCbError  pfnErrorCb;                                 ///< Function pointer to the error callback function
@@ -163,7 +164,7 @@ tOplkError edrvcyclic_init(void)
 
 //------------------------------------------------------------------------------
 /**
-\brief  Cyclic Ethernet driver shutdown
+\brief  Shut down cyclic Ethernet driver
 
 This function shuts down the cyclic Ethernet driver.
 
@@ -172,7 +173,7 @@ This function shuts down the cyclic Ethernet driver.
 \ingroup module_edrv
 */
 //------------------------------------------------------------------------------
-tOplkError edrvcyclic_shutdown(void)
+tOplkError edrvcyclic_exit(void)
 {
     if (instance_l.apTxBufferList != NULL)
     {
@@ -344,13 +345,18 @@ Exit:
 
 This function stops the cycles.
 
+\param  fKeepCycle_p    If TRUE, just stop transmission (i.e. slot timer),
+                        but keep cycle timer running.
+
 \return The function returns a tOplkError error code.
 
 \ingroup module_edrv
 */
 //------------------------------------------------------------------------------
-tOplkError edrvcyclic_stopCycle(void)
+tOplkError edrvcyclic_stopCycle(BOOL fKeepCycle_p)
 {
+    UNUSED_PARAMETER(fKeepCycle_p);
+
     return hrestimer_deleteTimer(&instance_l.timerHdlCycle);
 }
 
@@ -447,7 +453,7 @@ static tOplkError timerHdlCycleCb(tTimerEventArg* pEventArg_p)
     BENCHMARK_MOD_01_SET(0);
 
     //get timer tick before calling TX Process
-    macTime1 = openmac_timerGetTimeValue(HWTIMER_SYNC);
+    macTime1 = OPENMAC_TIMERGETTIMEVALUE();
 
     ret = processTxBufferList();
 
@@ -457,7 +463,7 @@ static tOplkError timerHdlCycleCb(tTimerEventArg* pEventArg_p)
     }
 
     //get timer tick after calling TX Process
-    macTime2 = openmac_timerGetTimeValue(HWTIMER_SYNC);
+    macTime2 = OPENMAC_TIMERGETTIMEVALUE();
 
     //obtain absolute difference
     macTimeDiff = macTime2 - macTime1;
@@ -521,7 +527,7 @@ static tOplkError processTxBufferList(void)
     tEdrvTxBuffer*  pTxBuffer = NULL;
     UINT32          absoluteTime; //absolute time accumulator
     BOOL            fFirstPkt = TRUE; //flag to identify first packet
-    UINT32          macTimeFctCall = openmac_timerGetTimeValue(HWTIMER_SYNC); //MAC TIME AT FUNCTION CALL
+    UINT32          macTimeFctCall = OPENMAC_TIMERGETTIMEVALUE(); //MAC TIME AT FUNCTION CALL
     UINT32          cycleMin = 0; //absolute minimum cycle time
     UINT32          cycleMax = 0; //absolute maximum cycle time
     UINT32          nextOffsetNs = 0; //next earliest tx time

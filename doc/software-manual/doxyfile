@@ -38,7 +38,7 @@ PROJECT_NAME           = openPOWERLINK
 # could be handy for archiving the generated documentation or if some version
 # control system is used.
 
-PROJECT_NUMBER         = 2.1.2
+PROJECT_NUMBER         = 2.2.0
 
 # Using the PROJECT_BRIEF tag one can provide an optional one line description
 # for a project that appears at the top of each page and should give viewer a
@@ -776,6 +776,7 @@ INPUT                  = ../../stack/src \
                          ../directories.md \
                          ../glossary.md \
                          ../openconfigurator.md \
+                         ../mn-redundancy.md \
                          ../supported-platforms/linux.md \
                          ../supported-platforms/windows.md \
                          ../supported-platforms/x86.md \
@@ -783,6 +784,7 @@ INPUT                  = ../../stack/src \
                          ../supported-platforms/altera-cn.md \
                          ../supported-platforms/xilinx.md \
                          ../supported-platforms/zynq.md \
+                         ../supported-platforms/altera-soc.md \
                          ../../readme.md \
                          ../../license.md \
                          ../../revision.md
@@ -1983,6 +1985,7 @@ INCLUDE_FILE_PATTERNS  =
 # This tag requires that the tag ENABLE_PREPROCESSING is set to YES.
 
 PREDEFINED             = CONFIG_INCLUDE_NMT_MN \
+                         CONFIG_INCLUDE_NMT_RMN \
                          CONFIG_INCLUDE_PDO \
                          CONFIG_INCLUDE_SDOS \
                          CONFIG_INCLUDE_SDOC \
